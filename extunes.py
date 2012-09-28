@@ -34,6 +34,18 @@ import traceback
 
 FLAGS = None
 
+# Dict entries in playlists and what to flag them as in list mode.
+PLAYLIST_FLAGS = (
+  ['Master', 'A'],
+  ['Music', 'M'],
+  ['Visible', 'N'],
+  ['Movies', 'V'],
+  ['TV Shows', 'T'],
+  ['Purchased Music', 'P'],
+  ['Party Shuffle', 'D'],
+  ['Smart Criteria', 'S'],
+)
+
 ###########################################################################
 # Convert a number of bytes into something human readable.
 # Taken from:
@@ -340,9 +352,17 @@ if __name__ == '__main__':
   if FLAGS.list:
     print 'Playlists found:'
     for plist in xml_key(u'Playlists', itxml):
+      #print plist
       if u'Name' not in plist:
         error_exit('Corrupt playlist data: %s' % plist)
       else:
+        # Tag the playlist with flags depending on which keys exist in
+        # the playlist entry, smart criteria, all items, etc.
+        flags = ''
+        for flag in PLAYLIST_FLAGS:
+          if flag[0] in plist:
+            flags += flag[1]
+
         name = '\'%s\'' % plist[u'Name']
         size = 0
         if 'Playlist Items' not in plist:
@@ -354,13 +374,12 @@ if __name__ == '__main__':
               error_exit('Corrupt playlist/track data: %s' % track)
               next
             size += track_size(str(track['Track ID']), itxml)
-        print ('  {:<40} {:12d} tracks {:>9}'.format(name, track_num,
-                                                     bytes2human(size)))
+        print ('  {:<38} {:10d} tracks {:>9} {:>8}'.format(
+               name, track_num, bytes2human(size), flags))
 
     all_tracks = xml_key(u'Tracks', itxml)
     total_track_num = len(all_tracks)
     total_size = 0
-    #print all_tracks
     for track in all_tracks:
       total_size += all_tracks[track]['Size']
     print ('Total in db: {:12d} tracks {:>9}'.format(total_track_num,
