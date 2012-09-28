@@ -62,42 +62,6 @@ def bytes2human(n, format='%(value).4g%(symbol)s'):
   return format % dict(symbol=symbols[0], value=n)
 
 ###########################################################################
-# Convert a track id to a local filename.
-def track_name(track, xmlblob):
-  try:
-    result = name_convert(xmlblob[u'Tracks'][track]['Location'])
-  except:
-    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
-  return result
-
-###########################################################################
-# Convert a track id to a track size in bytes.
-def track_size(track, xmlblob):
-  try:
-    result = xmlblob[u'Tracks'][track]['Size']
-  except:
-    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
-  return result
-
-###########################################################################
-# Get a key from the iTunes xml file with lots of error checking/reporting.
-def xml_key(key, xmlblob):
-  if key not in xmlblob:
-    error_exit('Key missing from iTunes XML data. Corrupt or newer format?',
-               code=4)
-  try:
-    result = xmlblob[key]
-  except:
-    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
-
-  return result
-
-###########################################################################
-# Convert itunes url style filename to a local filename.
-def name_convert(filename):
-  return urllib.unquote(filename.split('file://localhost')[1])
-
-###########################################################################
 # Convert local filename to a fat32 valid filename relative to playlist.
 # This is rather more restictive than it needs to be, which is safer.
 #
@@ -210,6 +174,43 @@ def trace_last():
                                     sys.exc_info()[2])[-1]
 
 ###########################################################################
+# Convert itunes url style filename to a local filename.
+def name_convert(filename):
+  return urllib.unquote(filename.split('file://localhost')[1])
+
+###########################################################################
+# Convert a track id to a local filename.
+def track_name(track, xmlblob):
+  try:
+    result = name_convert(xmlblob[u'Tracks'][track]['Location'])
+  except:
+    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
+  return result
+
+###########################################################################
+# Convert a track id to a track size in bytes.
+def track_size(track, xmlblob):
+  try:
+    result = xmlblob[u'Tracks'][track]['Size']
+  except:
+    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
+  return result
+
+###########################################################################
+# Get a key from the iTunes xml file with lots of error checking/reporting.
+def xml_key(key, xmlblob):
+  if key not in xmlblob:
+    error_exit('Key missing from iTunes XML data. Corrupt or newer format?',
+               code=4)
+  try:
+    result = xmlblob[key]
+  except:
+    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
+
+  return result
+
+###########################################################################
+###########################################################################
 
 #for entry in itxml:
 #  print entry
@@ -311,7 +312,8 @@ if __name__ == '__main__':
     plistdir = os.path.join(dest, FLAGS.plistdir)
 
     # Make sure playlists and music directories exist.
-    print 'Checking paths for existence.'
+    if not FLAGS.quiet:
+      print 'Checking paths for existence.'
     for path in [plistdir, music]:
       if not FLAGS.quiet:
         print '  Checking "%s".' % path
@@ -386,7 +388,7 @@ if __name__ == '__main__':
                                                bytes2human(total_size)))
     sys.exit(0)
 
-  print 'Number of tracks in the db: %d' % len(xml_key(u'Tracks', itxml))
+  print 'Number of tracks in the db: %d\n' % len(xml_key(u'Tracks', itxml))
 
   # Go through all the possible playlists and match against the
   # ones we want to copy.
@@ -404,7 +406,8 @@ if __name__ == '__main__':
       else:
 
         # Keep a list of matching playlists we found for display later.
-        print 'Found playlist: %s' % plist[u'Name']
+        if not FLAGS.quiet:
+          print 'Found playlist: %s' % plist[u'Name']
         found_plists.append(plist[u'Name'])
 
         # Make a list of playlists and the tracks in those playlists.
@@ -425,7 +428,8 @@ if __name__ == '__main__':
     for plist in found_plists:
       missing_plists.remove(plist)
 
-  print 'Playlist(s) to be copied: %s' % quote_list(found_plists)
+  if FLAGS.quiet:
+    print 'Playlist(s) to be copied: %s' % quote_list(found_plists)
   print 'Playlist(s) not found: %s' % quote_list(missing_plists)
 
   # Generate a unique list of all tracks required from all playlists
@@ -478,8 +482,11 @@ if __name__ == '__main__':
   if FLAGS.noop:
     print 'noop: not cleaning up old playlists.'
   else:  
+    if not FLAGS.quiet:
+      print 'Cleaning up old playlists.'
     (files, dirs) = clean_tree(plistdir, playlist_files)
-    print '  Removed %i files and %i directories.' % (files, dirs)
+    if not FLAGS.quiet:
+      print '  Removed %i files and %i directories.' % (files, dirs)
 
   print 'Checking tracks.'
   synced_tracks = []
