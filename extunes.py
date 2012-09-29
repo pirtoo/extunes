@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 ###########################################################################
-# extunes.py v0.06.
+# extunes.py v0.10.
 # Copyright 2012 by Peter Radcliffe <pir-code@pir.net>.
 ###########################################################################
 # Export iTunes(TM) playlists from the XML file and sync a set of
@@ -32,33 +32,18 @@ import shutil
 import sys
 import traceback
 
-FLAGS = None
-
-# Dict entries in playlists and what to flag them as in list mode.
-PLAYLIST_FLAGS = (
-  ['Master', 'A'],
-  ['Music', 'M'],
-  ['Visible', 'N'],
-  ['Movies', 'V'],
-  ['TV Shows', 'T'],
-  ['Purchased Music', 'P'],
-  ['Party Shuffle', 'D'],
-  ['Smart Criteria', 'S'],
-)
-
 ###########################################################################
 # Convert a number of bytes into something human readable.
-# Taken from:
-# http://goo.gl/zeJZl
+# Taken from: http://goo.gl/zeJZl
 def bytes2human(n, format='%(value).4g%(symbol)s'):
   symbols = ('B', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y')
   prefix = {}
   for i, s in enumerate(symbols[1:]):
-      prefix[s] = 1 << (i+1)*10
+    prefix[s] = 1 << (i+1)*10
   for symbol in reversed(symbols[1:]):
-      if n >= prefix[symbol]:
-          value = float(n) / prefix[symbol]
-          return format % locals()
+    if n >= prefix[symbol]:
+      value = float(n) / prefix[symbol]
+      return format % locals()
   return format % dict(symbol=symbols[0], value=n)
 
 ###########################################################################
@@ -91,19 +76,20 @@ def quote_list(text_list):
 ###########################################################################
 # Check if destination directory and it's parents up to stopdir exist.
 # Recursive function.
-def mkdirsifnotexists(direct, stopdir):
+def mk_missing_dirs(direct, stopdir):
   if direct != stopdir and not os.path.isdir(direct):
-    mkdirsifnotexists(os.path.dirname(direct), stopdir)
+    mk_missing_dirs(os.path.dirname(direct), stopdir)
     #print 'Making directory %s' % direct
     try:
       os.mkdir(direct)
     except (IOError, OSError) as e:
-      error_exit('Failed to delete directory "%s":\n  %s\n' %
-                 (full_file, e), 6)
+      error_exit('Failed to delete directory "%s":\n  %s' %
+                 (full_file, e), code=6)
 
 ###########################################################################
 def clean_tree(base, keep_list):
-
+  # Remove files that are not in keep_list and also any empty
+  # directories. Do not remove base.
   file_count = 0
   dir_count = 0
 
@@ -127,7 +113,7 @@ def clean_tree(base, keep_list):
         try:
           os.remove(full_file)
         except (IOError, OSError) as e:
-          error_exit('Failed to delete file "%s":\n  %s\n' %
+          error_exit('Failed to delete file "%s":\n  %s' %
                      (full_file, e), 6)
 
     # Do not remove the base directory.
@@ -145,7 +131,6 @@ def clean_tree(base, keep_list):
         if os.path.isdir(os.path.join(root, adir)):
           empty = False
           break
-
       if not empty:
         continue
 
@@ -155,15 +140,15 @@ def clean_tree(base, keep_list):
       try:
         os.rmdir(root)
       except (IOError, OSError) as e:
-        error_exit('Failed to delete directory "%s":\n  %s\n' %
-                   (full_file, e), 6)
+        error_exit('Failed to delete directory "%s":\n  %s' %
+                   (full_file, e), code=6)
 
   return (file_count, dir_count)
 
 ###########################################################################
 # Print an error to stderr and exit with exit code.
 def error_exit(text, code=None):
-  sys.stderr.write(sys.argv[0] + ': ' + text)
+  sys.stderr.write(sys.argv[0] + ': ' + text + '\n')
   if code:
     sys.exit(code)
 
@@ -174,59 +159,179 @@ def trace_last():
                                     sys.exc_info()[2])[-1]
 
 ###########################################################################
-# Convert itunes url style filename to a local filename.
-def name_convert(filename):
-  return urllib.unquote(filename.split('file://localhost')[1])
+# Copy a list of pairs of files.
+def copy_tracks(track_pairs, musicbase):
+
+  remaining_tracks = len(track_pairs)
+  if remaining_tracks is 0:
+    print 'No tracks to copy.'
+
+  else:
+    if FLAGS.noop:
+      print 'noop: not copying %i remaining tracks.' % remaining_tracks
+    else:
+      print 'Copying %i remaining tracks.' % remaining_tracks
+
+    for (local_file, remote_file) in track_pairs:
+      if FLAGS.noop:
+        if not FLAGS.quiet:
+          print ('  noop: not copying "%s"\n   to "%s".' %
+                 (local_file, remote_file))
+      else:
+        if not FLAGS.quiet:
+          print '  Copying "%s"\n   to "%s".' % (local_file, remote_file)
+        # Make the path exist if it doesn't.
+        mk_missing_dirs(os.path.dirname(remote_file), musicbase)
+        try:
+          ## This copy could be switched to the rsync algorithm?
+          shutil.copyfile(local_file, remote_file)
+        except (IOError, OSError) as e:
+          error_exit('Failed to copy to file "%s":\n  %s' %
+                     (remote_file, e), code=6)
 
 ###########################################################################
-# Convert a track id to a local filename.
-def track_name(track, xmlblob):
-  try:
-    result = name_convert(xmlblob[u'Tracks'][track]['Location'])
-  except:
-    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
-  return result
+class tunes_xml:
+  """Parse an iTunes(TM) XML file and provide easy access to it's data."""
+
+  #for entry in self.tunes:
+  #  print entry
+  #
+  # Major Version
+  # Minor Version
+  # Playlists
+  # Features
+  # Library Persistent ID
+  # Musicpl Folder
+  # Application Version
+  # Tracks
+  # Date
+
+  # Dict entries in playlists and what to flag them as in list mode.
+  playlist_flagset = (
+    ['Master', 'A'],
+    ['Music', 'M'],
+    ['Visible', 'N'],
+    ['Movies', 'V'],
+    ['TV Shows', 'T'],
+    ['Purchased Music', 'P'],
+    ['Party Shuffle', 'D'],
+    ['Smart Criteria', 'S'],
+  )
+
+  def __init__(self, xmlfile):
+    # Init and parse the XML.
+    try:
+      self.tunes = plistlib.readPlist(xmlfile)
+    except IOError as e:
+      error_exit('Cannot open "%s": %s' % (FLAGS.itunes, e), code=4)
+    except:
+      # Yes, yes, this should raise a new exception. Don't care.
+      error_exit('Failed to parse iTunes XML file "%s":\n  %s' %
+                 (FLAGS.itunes, trace_last()), code=4)
+
+    # Create an index to playlist objects.
+    self.plist_index = {}
+    for plist_obj in self.__playlists_obj():
+      if u'Name' in plist_obj:
+        self.plist_index[plist_obj[u'Name']] = plist_obj
+
+  def has_key(self, key):
+    # Return if a key exists in the XML.
+    return(key in self.tunes)
+
+  def key(self, key):
+    # Return a key from the tunes xml.
+    if not self.has_key(key):
+      error_exit('Key "%s" missing from iTunes XML data.'
+                 ' Corrupt or newer format?' % key, code=4)
+    try:
+      result = self.tunes[key]
+    except:
+      error_exit('Failed to use iTunes XML data: %s' %
+                 trace_last(), code=4)
+    return result
+
+  def __playlists_obj(self):
+    # Generate an interable list of playlists.
+    for plist in self.key(u'Playlists'):
+      if u'Name' not in plist:
+        next
+      yield plist
+
+  def playlists(self):
+    # Generate an interable list of playlist names.
+    for plist in self.key(u'Playlists'):
+      if u'Name' not in plist:
+        next
+      yield plist[u'Name']
+
+  def playlist(self, plist_name):
+    # Return a specific playlist object if it exists.
+    if plist_name in self.plist_index:
+      return self.plist_index[plist_name]
+    return None
+
+  def playlist_flags(self, plist_name):
+    # Return flags denoting things about a playlist, such as if it is
+    # a smart playlist.
+    plist = self.playlist(plist_name)
+    if not plist:
+      return None
+    flags = ''
+    for flag in self.playlist_flagset:
+      if flag[0] in plist:
+        flags += flag[1]
+    return flags
+
+  def playlist_tracks(self, plist_name):
+    # Return tracks from a playlist in a usable form.
+    plist_obj = self.playlist(plist_name)
+    if not plist_obj:
+      return None
+    tracks = []
+    if 'Playlist Items' in plist_obj:
+      for track in plist_obj['Playlist Items']:
+        if 'Track ID' in track:
+          tracks.append(str(track['Track ID']))
+    return tracks
+
+  def track_size(self, track):
+    # Convert a track id to a track size in bytes.
+    try:
+      result = self.tunes[u'Tracks'][track]['Size']
+    except:
+      error_exit('Failed to use iTunes XML data: %s' % trace_last(),
+                 code=4)
+    return result
+
+  def name_convert(self, filename):
+    return urllib.unquote(filename.split('file://localhost')[1])
+
+  def track_name(self, track):
+  # Convert a string track id to a local filename.
+    try:
+      result = self.name_convert(self.tunes[u'Tracks'][track]['Location'])
+    except:
+      error_exit('Failed to use iTunes XML data: %s' %
+                 trace_last(), code=4)
+    return result
+
+  def music_folder(self):
+  # Return a converted music folder name.
+    return self.name_convert(self.key(u'Music Folder'))
+
+  def tracks(self):
+  # Return the dict of global tracks.
+    if u'Tracks' not in self.tunes:
+      return []
+    tracks = []
+    for track in self.key(u'Tracks'):
+      if 'Track ID' in track:
+        tracks.append(str(track['Track ID']))
+    return tracks
 
 ###########################################################################
-# Convert a track id to a track size in bytes.
-def track_size(track, xmlblob):
-  try:
-    result = xmlblob[u'Tracks'][track]['Size']
-  except:
-    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
-  return result
-
-###########################################################################
-# Get a key from the iTunes xml file with lots of error checking/reporting.
-def xml_key(key, xmlblob):
-  if key not in xmlblob:
-    error_exit('Key missing from iTunes XML data. Corrupt or newer format?',
-               code=4)
-  try:
-    result = xmlblob[key]
-  except:
-    error_exit('Failed to use iTunes XML data: %s' % trace_last(), code=4)
-
-  return result
-
-###########################################################################
-###########################################################################
-
-#for entry in itxml:
-#  print entry
-#
-# Major Version
-# Minor Version
-# Playlists
-# Features
-# Library Persistent ID
-# Musicpl Folder
-# Application Version
-# Tracks
-# Date
-
-
-if __name__ == '__main__':
+def main():
   ## TODO:
 
   ## check date of itunes lib against a sync file in the destination?
@@ -236,7 +341,6 @@ if __name__ == '__main__':
   ##   paths to be ignored in cleanup under music and playlists
   ##   clean up/remove all files mode.
 
-  ## put all filesystem ops in try blocks
   ## check if dest is under itunes music directory
 
   ## Count how many deletions would be made on a dry run.
@@ -251,8 +355,11 @@ if __name__ == '__main__':
 
 
   # Command line arguments.
-  args = argparse.ArgumentParser(description='Export playlists from iTunes.',
-                                 fromfile_prefix_chars='@')
+  args = argparse.ArgumentParser(
+     description='Export playlists and tracks from iTunes(TM).',
+     fromfile_prefix_chars='@',
+     epilog='An option of @filename will interpret arguments from'
+            'filename, one per line.')
 
   args.add_argument('--itunes', '-i',
                     help='Location of iTunes XML file.',
@@ -270,13 +377,11 @@ if __name__ == '__main__':
   args.add_argument('--noop', '-n',
                     action='store_true',
                     help='No-op, no operation, dry run.')
-
-  arg_destlist = args.add_mutually_exclusive_group()
-  arg_destlist.add_argument('--dest', '-d',
-                            help='Destination directory.')
-  arg_destlist.add_argument('--list', '-l',
-                             action='store_true',
-                             help='List laylists found in the XML.')
+  args.add_argument('--dest', '-d',
+                    help='Destination directory.')
+  args.add_argument('--list', '-l',
+                    action='store_true',
+                    help='List laylists found in the XML.')
   
   arg_plists = args.add_mutually_exclusive_group()
   arg_plists.add_argument('--plists', '-p',
@@ -288,136 +393,86 @@ if __name__ == '__main__':
                           default=False,
                           help='Export all playlists.')
 
+  global FLAGS
+  ## Put a try around this to catch @file errors?
   FLAGS = args.parse_args()
-
-  if not FLAGS.list:
-    # Arguments that are required if list wasn't given.
-    # These are here to error out quickly before the XML is
-    # parsed because that takes time.
-    if not FLAGS.dest:
-      args.error('one of the arguments --dest/-d --list/-l is required')
-
-    if len(FLAGS.plists) == 0 and not FLAGS.all_plists:
-      args.error('one of the arguments --plists/-p --all-plists/-a is required')
-
-    if FLAGS.noop:
-      print 'noop: No-op mode, no changes will be made!'
-
-    # Detail the other arguments if not dealing with list.
-    dest = os.path.expanduser(FLAGS.dest)
-    # Error out if the detination doesn't exist.
-    if not os.path.isdir(dest):
-      error_exit('dest dir not found: "%s"\n' % dest, 5)
-    music = os.path.join(dest, FLAGS.music)
-    plistdir = os.path.join(dest, FLAGS.plistdir)
-
-    # Make sure playlists and music directories exist.
-    if not FLAGS.quiet:
-      print 'Checking paths for existence.'
-    for path in [plistdir, music]:
-      if not FLAGS.quiet:
-        print '  Checking "%s".' % path
-      if not os.path.isdir(path):
-        if FLAGS.noop and not FLAGS.quiet:
-            print '  noop: not creating "%s".' % path
-        else:
-          if not FLAGS.quiet:
-            print '  Creating "%s".' % path
-
-          try:
-            os.mkdir(path)
-          except (IOError, OSError) as e:
-            error_exit('Failed to create directory "%s":\n  %s\n' %
-                       (path, e), 6)
-
-  # Try to parse the XML file.
-  try:
-    itxml = plistlib.readPlist(os.path.expanduser(FLAGS.itunes))
-  except IOError as e:
-    error_exit('Cannot open "%s": %s' % (FLAGS.itunes, e), 4)
-  except:
-    error_exit('Failed to parse iTunes XML file "%s":\n  %s' %
-               (FLAGS.itunes, trace_last()), code=4)
-
-  dbdate = xml_key('Date', itxml)
-  dbver = '%s.%s' % (xml_key('Major Version', itxml),
-                     xml_key('Minor Version', itxml))
-  musicdir = name_convert(xml_key('Music Folder', itxml))
-
-  print 'XML file version %s, date %s' % (dbver, dbdate)
-  print 'Music dir: %s' % musicdir
-
-  found_plists = []
-  playlists = []
 
   # If the list option has been given, list playlists and exit.
   if FLAGS.list:
+    if not FLAGS.quiet:
+      print 'Parsing XML file.'
+    itxml = tunes_xml(os.path.expanduser(FLAGS.itunes))
     print 'Playlists found:'
-    for plist in xml_key(u'Playlists', itxml):
-      #print plist
-      if u'Name' not in plist:
-        error_exit('Corrupt playlist data: %s' % plist)
-      else:
-        # Tag the playlist with flags depending on which keys exist in
-        # the playlist entry, smart criteria, all items, etc.
-        flags = ''
-        for flag in PLAYLIST_FLAGS:
-          if flag[0] in plist:
-            flags += flag[1]
-
-        name = '\'%s\'' % plist[u'Name']
-        size = 0
-        if 'Playlist Items' not in plist:
-          track_num = 0
-        else:
-          track_num = len(plist['Playlist Items'])
-          for track in plist['Playlist Items']:
-            if 'Track ID' not in track:
-              error_exit('Corrupt playlist/track data: %s' % track)
-              next
-            size += track_size(str(track['Track ID']), itxml)
-        print ('  {:<38} {:10d} tracks {:>9} {:>8}'.format(
-               name, track_num, bytes2human(size), flags))
-
-    all_tracks = xml_key(u'Tracks', itxml)
-    total_track_num = len(all_tracks)
-    total_size = 0
-    for track in all_tracks:
-      total_size += all_tracks[track]['Size']
-    print ('Total in db: {:12d} tracks {:>9}'.format(total_track_num,
-                                               bytes2human(total_size)))
+    for plist in itxml.playlists():
+      qname = '\'%s\'' % plist
+      size = 0
+      track_num = 0
+      for track in itxml.playlist_tracks(plist):
+        track_num += 1
+        size += itxml.track_size(track)
+      print ('  {:<43} {:8d} tracks {:>10} {:>6}'.format(
+             qname, track_num, bytes2human(size), itxml.playlist_flags(plist)))
     sys.exit(0)
 
-  print 'Number of tracks in the db: %d\n' % len(xml_key(u'Tracks', itxml))
+  # Arguments that are required if list wasn't given.
+  if not FLAGS.dest:
+    args.error('one of the arguments --dest/-d --list/-l is required')
+
+  if len(FLAGS.plists) == 0 and not FLAGS.all_plists:
+    args.error('one of the arguments --plists/-p --all-plists/-a is required')
+
+  if FLAGS.noop:
+    print 'noop: No-op mode, no changes will be made!'
+
+  dest = os.path.expanduser(FLAGS.dest)
+  # Error out if the detination doesn't exist.
+  if not os.path.isdir(dest):
+    error_exit('dest dir not found: "%s"' % dest, code=5)
+  music = os.path.join(dest, FLAGS.music)
+  plistdir = os.path.join(dest, FLAGS.plistdir)
+
+  # Make sure playlists and music directories exist.
+  if not FLAGS.quiet:
+    print 'Checking music and playlist paths for existence.'
+  for path in [plistdir, music]:
+    if not os.path.isdir(path):
+      if FLAGS.noop and not FLAGS.quiet:
+          print '  noop: not creating "%s".' % path
+      else:
+        if not FLAGS.quiet:
+          print '  Creating "%s".' % path
+        try:
+          os.mkdir(path)
+        except (IOError, OSError) as e:
+          error_exit('Failed to create directory "%s":\n  %s' %
+                     (path, e), code=6)
+
+  # Try to parse the XML file.
+  if not FLAGS.quiet:
+    print 'Parsing XML file.'
+  itxml = tunes_xml(os.path.expanduser(FLAGS.itunes))
+
+  dbdate = itxml.key('Date')
+  dbver = '%s.%s' % (itxml.key('Major Version'), itxml.key('Minor Version'))
+  musicdir = itxml.music_folder()
+
+  if not FLAGS.quiet:
+    print 'XML file version %s, date %s' % (dbver, dbdate)
+    print 'Music dir: %s' % musicdir
+    print 'Number of tracks in the db: %d\n' % len(itxml.tracks())
 
   # Go through all the possible playlists and match against the
   # ones we want to copy.
-  for plist in xml_key(u'Playlists', itxml):
-    # Check the basic playlist contents exist.
-    if u'Name' not in plist:
-      print 'Corrupt playlist data: %s' % plist
-      next
-
+  playlists = []
+  for plist in itxml.playlists():
     # If we have a match, copy the lists.
-    if FLAGS.all_plists or plist[u'Name'] in FLAGS.plists:
-      if not 'Playlist Items' in plist:
+    if FLAGS.all_plists or plist in FLAGS.plists:
+      tracks = itxml.playlist_tracks(plist)
+      if len(tracks) == 0:
         # Empty playlist, ignore it.
-        print 'Found empty playlist: %s' % plist[u'Name']
+        print 'Found empty playlist: %s' % plist
       else:
-
-        # Keep a list of matching playlists we found for display later.
-        if not FLAGS.quiet:
-          print 'Found playlist: %s' % plist[u'Name']
-        found_plists.append(plist[u'Name'])
-
-        # Make a list of playlists and the tracks in those playlists.
-        tracks = []
-        for track in plist['Playlist Items']:
-          if 'Track ID' not in track:
-            error_exit('Corrupt playlist/track data: %s' % track)
-            next
-          tracks.append(str(track['Track ID']))
-        playlists.append([plist['Name'], tracks])
+        playlists.append(plist)
 
   # Take the list of matching found playlists and remove it from the
   # list of desired playlists to display the missing playlists.
@@ -425,50 +480,51 @@ if __name__ == '__main__':
     missing_plists = []
   else:
     missing_plists = copy.copy(FLAGS.plists)
-    for plist in found_plists:
+    for plist in playlists:
       missing_plists.remove(plist)
 
-  if FLAGS.quiet:
-    print 'Playlist(s) to be copied: %s' % quote_list(found_plists)
+  print 'Playlist(s) to be copied: %s' % quote_list(playlists)
   print 'Playlist(s) not found: %s' % quote_list(missing_plists)
+
+  if FLAGS.noop:
+    print 'noop: not creating playlists.'
+  else:
+    if not FLAGS.quiet:
+      print 'Creating playlists.'
 
   # Generate a unique list of all tracks required from all playlists
   # that are to be copied.
   # Also keep track of what playlist files we create.
   tracks = []
   playlist_files = []
-  if FLAGS.noop:
-    print 'noop: not creating playlists.'
-  else:
-    print 'Creating playlists.'
-
   for plist in playlists:
     # Add the tracks from this playlist to the general list, keeping it
     # unique with a set conversion.
-    tracks = list(set(tracks + plist[1]))
+    plist_tracks = itxml.playlist_tracks(plist)
+    tracks = list(set(tracks + plist_tracks))
     # Generate the file name of this playlist.
-    plist_name = os.path.join(plistdir, '%s.m3u' % plist[0])
+    plist_filename = os.path.join(plistdir, '%s.m3u' % plist)
     # Keep a list of playlist filenames.
-    playlist_files.append(plist_name)
+    playlist_files.append(plist_filename)
 
     # Create playlist file.
     if FLAGS.noop and not FLAGS.quiet:
-      print 'noop: not writing to "%s"' % plist_name
+      print 'noop: not writing to "%s"' % plist
     else:
       if not FLAGS.quiet:
-        print '  Writing to "%s"' % plist_name
+        print '  Writing to "%s"' % plist_filename
       # Try to write the m3u playlist file out.
       try:
-        plist_file = open(plist_name, 'w')
+        plist_file = open(plist_filename, 'w')
       except (IOError, OSError) as e:
-        error_exit('Failed to open new playlist "%s":\n   %s\n' %
-                   (path, e), 6)
+        error_exit('Failed to open new playlist "%s":\n   %s' %
+                   (path, e), code=6)
 
-      for track in plist[1]:
+      for track in plist_tracks:
         # As well as filename rewriting these paths need to be relative
         # to the playlists directory and DOS style paths with backslashes
         # rather than slashes.
-        plist_track = fat32_convert(track_name(track, itxml), musicdir, music)
+        plist_track = fat32_convert(itxml.track_name(track), musicdir, music)
         plist_file.write('%s\n' % dos_convert(plist_track, plistdir))
       plist_file.close()
   print 'Number of tracks in desired playlists: %d' % len(tracks)
@@ -476,7 +532,7 @@ if __name__ == '__main__':
   synced_size = 0
   for track in tracks:
     # Add up how big the synced size of tracks will be.
-    synced_size += track_size(track, itxml)
+    synced_size += itxml.track_size(track)
   print ('Size of synced tracks: %s' % bytes2human(synced_size))
 
   if FLAGS.noop:
@@ -488,12 +544,13 @@ if __name__ == '__main__':
     if not FLAGS.quiet:
       print '  Removed %i files and %i directories.' % (files, dirs)
 
-  print 'Checking tracks.'
+  if not FLAGS.quiet:
+    print 'Checking tracks.'
   synced_tracks = []
   to_sync_tracks = []
   to_sync_size = 0
   for track in tracks:
-    local_file = track_name(track, itxml)
+    local_file = itxml.track_name(track)
     remote_file = fat32_convert(local_file, musicdir, music)
     synced_tracks.append(remote_file)
 
@@ -504,7 +561,7 @@ if __name__ == '__main__':
         local_size = os.path.getsize(local_file)
         remote_size = os.path.getsize(remote_file)
       except (IOError, OSError) as e:
-        error_exit('Failed to get filesize: %s\n' % e)
+        error_exit('Failed to get filesize: %s' % e)
       else:
         if local_size == remote_size:
           # File exists and is the same size, skip it.
@@ -513,7 +570,7 @@ if __name__ == '__main__':
     # If the file doesn't exist or the filesize doesn't match
     # list the file to be copied.
     to_sync_tracks.append((local_file, remote_file))
-    to_sync_size += track_size(track, itxml)
+    to_sync_size += itxml.track_size(track)
 
   print ('Size of tracks to sync: %s' % bytes2human(to_sync_size))
 
@@ -528,29 +585,10 @@ if __name__ == '__main__':
 
   # Now that we've freed up whatever disk space can be by deleting things
   # copy any remaining tracks that are needed.
-  remaining_tracks = len(to_sync_tracks)
-  if remaining_tracks is 0:
-    print 'No tracks to copy.'
-  else:
-    if FLAGS.noop:
-      print 'noop: not copying %i remaining tracks.' % remaining_tracks
-    else:
-      print 'Copying %i remaining tracks.' % remaining_tracks
+  copy_tracks(to_sync_tracks, music)
 
-    for (local_file, remote_file) in to_sync_tracks:
-      if FLAGS.noop:
-        if not FLAGS.quiet:
-          print ('  noop: not copying "%s"\n   to "%s".' %
-                 (local_file, remote_file))
-      else:
-        if not FLAGS.quiet:
-          print '  Copying "%s"\n   to "%s".' % (local_file, remote_file)
-        # Make the path exist if it doesn't.
-        mkdirsifnotexists(os.path.dirname(remote_file), music)
-        try:
-          ## This copy could be switched to the rsync algorithm?
-          shutil.copyfile(local_file, remote_file)
-        except (IOError, OSError) as e:
-          error_exit('Failed to delete directory "%s":\n  %s\n' %
-                     (full_file, e), 6)
+###########################################################################
+if __name__ == '__main__':
+  main()
 
+###########################################################################
