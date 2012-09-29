@@ -432,6 +432,10 @@ def main():
                      default=[],
                      metavar='PLAYLIST',
                      help='List of names of playlists to never export')
+  args.add_argument('--plists-prefix',
+                     metavar='PREFIX',
+                     default='',
+                     help='Prefix to add to the start of the playlist names')
   
   arg_plists = args.add_mutually_exclusive_group()
   arg_plists.add_argument('--plists', '-p',
@@ -574,7 +578,8 @@ def main():
     plist_tracks = itxml.playlist_tracks(plist)
     tracks = list(set(tracks + plist_tracks))
     # Generate the file name of this playlist.
-    plist_filename = os.path.join(plist_dir, '%s.m3u' % plist)
+    plist_filename = os.path.join(plist_dir, '%s%s.m3u' %
+                                  (FLAGS.plists_prefix, plist))
     # Keep a list of all playlist filenames.
     playlist_files.append(plist_filename)
 
