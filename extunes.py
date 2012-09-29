@@ -394,53 +394,58 @@ def main():
             'filename, one per line.')
 
   args.add_argument('--itunes', '-i',
-                    help='Location of iTunes XML file.',
-                    metavar='itunes-xml-file',
+                    help='Location of iTunes XML file',
+                    metavar='ITUNES-XML-FILE',
                     default='~/Music/iTunes/iTunes Library.xml')
   args.add_argument('--plistdir',
-                    help='Name of playlist directory under destination dir.',
+                    help='Name of playlist directory under destination dir',
+                    metavar='PLAYLISTS',
                     default='Playlists')
   args.add_argument('--music',
-                    help='Name of music directory under destination dir.',
+                    help='Name of music directory under destination dir',
                     default='Music')
   args.add_argument('--quiet', '-q',
                     action='store_true',
-                    help='Quiet file copying/deleting output.')
+                    help='Quiet file copying/deleting output')
   args.add_argument('--noop', '-n',
                     action='store_true',
-                    help='No-op, no operation, dry run.')
+                    help='No-op, no operation, dry run')
   args.add_argument('--dest', '-d',
-                    help='Destination directory.')
+                    help='Destination directory')
   args.add_argument('--list', '-l',
                     action='store_true',
-                    help='List laylists found in the XML.')
+                    help='List laylists found in the XML')
   args.add_argument('--video',
                     action='store_true',
                     default=False,
-                    help='Also export video files. Still limited by --types')
+                    help='Also export video files, still limited by --types')
   args.add_argument('--nocopy',
                     action='store_true',
                     default=False,
-                    help='Do not copy files or rewrite names for playlists.')
+                    help='Do not copy files or rewrite names for playlists.'
+                         ' Used to generate playlist files for existing'
+                         ' tracks')
   
   arg_plists = args.add_mutually_exclusive_group()
   arg_plists.add_argument('--plists', '-p',
                           nargs='+',
                           default=[],
-                          help='Playlists to export.')
+                          metavar='PLAYLIST',
+                          help='List of names of playlists to export')
   arg_plists.add_argument('--all-plists', '-a',
                           action='store_true',
                           default=False,
-                          help='Export all playlists.')
+                          help='Export all playlists')
 
   arg_type = args.add_mutually_exclusive_group()
   arg_type.add_argument('--types',
                         nargs='+',
-                        help='What type(s) (extension(s)) of files to export.')
+                        help='What filetype(s) (file extension(s)) of files'
+                             ' to export such as mp2, mp3, wav, etc')
   arg_type.add_argument('--all-types',
                         action='store_true',
                         default=False,
-                        help='Export all types of (audio, by default) file.')
+                        help='Export all types of (audio, by default) file')
 
 
   global FLAGS
@@ -572,17 +577,19 @@ def main():
         # to the playlists directory and DOS style paths with backslashes
         # rather than slashes.
         track_name = itxml.track_name(track)
-        track_name = fat32_convert(track_name, musicdir, music)
-        track_name = re.sub('/', '\\\\', os.path.relpath(track_name, plist_dir))
+        if not FLAGS.nocopy:
+          track_name = fat32_convert(track_name, musicdir, music)
+          track_name = re.sub('/', '\\\\', os.path.relpath(track_name, plist_dir))
         plist_file.write('%s\n' % track_name)
       plist_file.close()
   print 'Number of tracks in desired playlists: %d' % len(tracks)
 
-  synced_size = 0
-  for track in tracks:
-    # Add up how big the synced size of tracks will be.
-    synced_size += itxml.track_size(track)
-  print ('Size of synced tracks: %s' % bytes2human(synced_size))
+  if not FLAGS.nocopy:
+    synced_size = 0
+    for track in tracks:
+      # Add up how big the synced size of tracks will be.
+      synced_size += itxml.track_size(track)
+    print ('Size of synced tracks: %s' % bytes2human(synced_size))
 
   if FLAGS.noop:
     print 'noop: not cleaning up old playlists.'
@@ -592,6 +599,10 @@ def main():
     (files, dirs) = clean_tree(plist_dir, playlist_files)
     if not FLAGS.quiet:
       print '  Removed %i files and %i directories.' % (files, dirs)
+
+  if FLAGS.nocopy:
+    # Nothing to copy, don't do anything else.
+    sys.exit(0)
 
   if not FLAGS.quiet:
     print 'Checking tracks.'
