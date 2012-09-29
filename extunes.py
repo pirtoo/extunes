@@ -140,7 +140,7 @@ def clean_tree(base, keep_list):
   return (file_count, dir_count)
 
 ###########################################################################
-# Print an error to stderr and exit with exit code.
+# Print an error to stderr and exit with exit code if one is given.
 def error_exit(text, code=None):
   sys.stderr.write(sys.argv[0] + ': ' + text + '\n')
   if code:
@@ -226,7 +226,7 @@ class tunes_xml:
 
   def is_playlist(self, plist_name):
     # Return if a specific playlist name exists or not.
-    return plist_name in self.plist_index
+    return (plist_name in self.plist_index)
 
   def __playlist_obj(self, plist_name):
     # Return a specific playlist object if it exists.
