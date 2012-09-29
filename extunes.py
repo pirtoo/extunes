@@ -206,6 +206,10 @@ class tunes_xml:
       if u'Name' in plist_obj:
         self.plist_index[plist_obj[u'Name']] = plist_obj
 
+  def __has_key(self, key):
+    # Return a key from the tunes xml.
+    return (key in self.tunes)
+
   def __key(self, key):
     # Return a key from the tunes xml.
     if not key in self.tunes:
@@ -340,12 +344,13 @@ class tunes_xml:
 
   def tracks(self):
   # Return a list of global track ids.
-    if u'Tracks' not in self.tunes:
+    if not self.__has_key(u'Tracks'):
       return []
     tracks = []
-    for track_gobj in self.__key(u'Tracks'):
+    for track in self.__key(u'Tracks'):
+      track = str(track)
+      track_gobj = self.__key(u'Tracks')[track]
       if 'Track ID' in track_gobj:
-        track = str(track_gobj['Track ID'])
         if self.__track_ok(track):
           tracks.append(track)
     return tracks
@@ -371,9 +376,6 @@ def main():
   ##   force sync everything
   ##   paths to be ignored in cleanup under music and playlists
   ##   clean up/remove all files
-  ##   do not copy/rename files
-  ##   do not dos_convert files
-  ##   do not cleanup/delete music files/directories, ever
 
   ## Count how many deletions would be made on a dry run.
   ## - calculate deletions/additions by number of files in list
@@ -425,6 +427,11 @@ def main():
                     help='Do not copy files or rewrite names for playlists.'
                          ' Used to generate playlist files for existing'
                          ' tracks')
+  args.add_argument('--plists-ignore',
+                     nargs='+',
+                     default=[],
+                     metavar='PLAYLIST',
+                     help='List of names of playlists to never export')
   
   arg_plists = args.add_mutually_exclusive_group()
   arg_plists.add_argument('--plists', '-p',
@@ -515,28 +522,40 @@ def main():
     print 'Number of tracks in the db: %d\n' % len(itxml.tracks())
 
   # Go through all the possible playlists and match against the
-  # ones we want to export.
+  # ones we want to export that aren't empty and aren't being ignored.
   playlists = []
+  ignored_playlists = []
   for plist in itxml.playlists():
     # If we have a match, copy the lists.
-    if FLAGS.all_plists or plist in FLAGS.plists:
+    if plist in FLAGS.plists_ignore:
+      if not FLAGS.quiet:
+        print 'Playlist in --plist-ignore: %s' % plist
+      ignored_playlists.append(plist)
+
+    # If we're not ignoring the playlist check if we want it.
+    elif FLAGS.all_plists or plist in FLAGS.plists:
       tracks = itxml.playlist_tracks(plist)
       if len(tracks) == 0:
-        print 'Ignoring empty playlist: %s' % plist
+        if not FLAGS.quiet:
+          print 'Ignoring empty playlist: %s' % plist
+        ignored_playlists.append(plist)
       else:
         playlists.append(plist)
 
   # Take the list of matching found playlists and remove it from the
   # list of desired playlists to display the missing playlists.
   if FLAGS.all_plists:
-    missing_plists = []
+    missing_playlists = []
   else:
-    missing_plists = copy.copy(FLAGS.plists)
+    missing_playlists = copy.copy(FLAGS.plists)
     for plist in playlists:
-      missing_plists.remove(plist)
+      missing_playlists.remove(plist)
 
   print 'Playlist(s) to be copied: %s' % quote_list(playlists)
-  print 'Playlist(s) not found: %s' % quote_list(missing_plists)
+  if missing_playlists:
+    print 'Playlist(s) not found: %s' % quote_list(missing_playlists)
+  if ignored_playlists:
+    print 'Playlist(s) ignored: %s' % quote_list(ignored_playlists)
 
   if FLAGS.noop:
     print 'noop: not creating playlists.'
