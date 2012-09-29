@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 ###########################################################################
-# extunes.py v0.11.
+# extunes.py v0.12.
 # Copyright 2012 by Peter Radcliffe <pir-code@pir.net>.
 # http://www.pir.net/pir/hacks/extunes.py
 #
@@ -15,6 +15,9 @@
 #
 # If files or playlists are removed from the synced list then they
 # are cleaned up and empty directories are removed.
+#
+# Ignores the existence of non-local tracks (those without a size) which
+# are streaming URLs.
 #
 # Requires plistlib which is included with Python 2.6 or later.
 # This may work for earlier versions of Python:
@@ -146,7 +149,8 @@ def error_exit(text, code=None):
 ###########################################################################
 # Return the last line of a traceback.
 def trace_last():
-  return traceback.format_exception(tuple(sys.exc_info()))[-1]
+  return traceback.format_exception(sys.exc_info()[0], sys.exc_info()[1],
+                                    sys.exc_info()[2])[-1]
 
 ###########################################################################
 class tunes_xml:
@@ -177,7 +181,7 @@ class tunes_xml:
     ['Smart Criteria', 'S'],
   )
 
-  def __init__(self, xmlfile):
+  def __init__(self, xmlfile, types=None, all_types=False, video=False):
     # Init and parse the XML.
     try:
       self.tunes = plistlib.readPlist(xmlfile)
@@ -188,7 +192,15 @@ class tunes_xml:
       error_exit('Failed to parse iTunes XML file "%s":\n  %s' %
                  (FLAGS.itunes, trace_last()), code=4)
 
-    # Create an index to playlist objects.
+    # Store what type(s) of files to use.
+    if types is None:
+      self.types = ['mp2','mp3']
+    else:
+      self.types = types
+    self.all_types = all_types
+    self.video = video
+
+    # Create an index to all playlist objects.
     self.plist_index = {}
     for plist_obj in self.__key(u'Playlists'):
       if u'Name' in plist_obj:
@@ -212,7 +224,7 @@ class tunes_xml:
     # Return if a specific playlist name exists or not.
     return plist_name in self.plist_index
 
-  def __playlist(self, plist_name):
+  def __playlist_obj(self, plist_name):
     # Return a specific playlist object if it exists.
     if plist_name in self.plist_index:
       return self.plist_index[plist_name]
@@ -221,7 +233,7 @@ class tunes_xml:
   def playlist_flags(self, plist_name):
     # Return flags denoting things about a playlist, such as if it is
     # a smart playlist.
-    plist = self.__playlist(plist_name)
+    plist = self.__playlist_obj(plist_name)
     if not plist:
       return None
     flags = ''
@@ -232,45 +244,110 @@ class tunes_xml:
 
   def playlist_tracks(self, plist_name):
     # Return tracks from a playlist in a usable form.
-    plist_obj = self.__playlist(plist_name)
+    plist_obj = self.__playlist_obj(plist_name)
     if not plist_obj:
       return None
     tracks = []
     if 'Playlist Items' in plist_obj:
-      for track in plist_obj['Playlist Items']:
-        if 'Track ID' in track:
-          tracks.append(str(track['Track ID']))
+      for track_gobj in plist_obj['Playlist Items']:
+        if 'Track ID' in track_gobj:
+          track = str(track_gobj['Track ID'])
+          if self.__track_ok(track):
+            tracks.append(track)
     return tracks
+
+  def __track_ok(self, track):
+    # Return if a track is ok to output or not.
+    track_obj = self.__track_obj(track)
+
+    # If we don't know where the track is or what it is we can't do
+    # anything with it.
+    if not 'Location' in track_obj:
+      return False
+    if not 'Kind' in track_obj:
+      return False
+    # If the track has no size then it isn't local.
+    if not 'Size' in track_obj:
+      return False
+
+    # If we are not exporting video files, ignore them.
+    if not self.video:
+      # AAC audio file
+      # AIFF audio file
+      # Apple Lossless audio file
+      # MPEG audio file
+      # MPEG audio stream
+      # Protected AAC audio file
+      # Protected MPEG-4 video file
+      # Purchased AAC audio file
+      # Purchased MPEG-4 video file
+      # QuickTime movie file
+      # WAV audio file
+      kind = track_obj['Kind'].lower()
+      if ' video ' in kind:
+        return False
+      if ' movie ' in kind:
+        return False
+
+    # Are we exporting all types?
+    if not self.all_types:
+      # If the track isn't of a type we want, ignore it.
+      if self.track_suffix(track) not in self.types:
+        return False
+
+    return True
+
+  def __track_obj(self, track):
+  # Take a track id and return a track object.
+    try:
+      return self.tunes[u'Tracks'][track]
+    except:
+      error_exit('Failed to use iTunes XML data for track "%s": %s' %
+                 (track, trace_last()), code=4)
 
   def track_size(self, track):
     # Convert a track id to a track size in bytes.
-    try:
-      result = self.tunes[u'Tracks'][track]['Size']
-    except:
-      error_exit('Failed to use iTunes XML data: %s' % trace_last(),
-                 code=4)
-    return result
+    if self.__track_ok(track):
+      track_obj = self.__track_obj(track)
+      try:
+        result = track_obj['Size']
+      except:
+        error_exit('Failed to use iTunes XML data for track "%s": %s' %
+                   (track, trace_last()), code=4)
+      return result
+    else:
+      return 0
 
   def name_convert(self, filename):
-    return urllib.unquote(filename.split('file://localhost')[1])
+    return urllib.unquote(filename.split('file://localhost')[-1])
 
   def track_name(self, track):
   # Convert a string track id to a local filename.
     try:
-      result = self.name_convert(self.tunes[u'Tracks'][track]['Location'])
+      result = self.__track_obj(track)['Location']
     except:
-      error_exit('Failed to use iTunes XML data: %s' %
-                 trace_last(), code=4)
-    return result
+      error_exit('Failed to use iTunes XML data for track "%s": %s' %
+                 (track, trace_last()), code=4)
+    return self.name_convert(result)
+
+  def track_suffix(self, track):
+  # Convert a string track id to a local filename suffix.
+    name = self.track_name(track)
+    suffix = name.split('.')[-1]
+    if suffix is name:
+      return ''
+    return suffix.lower()
 
   def tracks(self):
-  # Return the dict of global tracks.
+  # Return a list of global track ids.
     if u'Tracks' not in self.tunes:
       return []
     tracks = []
-    for track in self.__key(u'Tracks'):
-      if 'Track ID' in track:
-        tracks.append(str(track['Track ID']))
+    for track_gobj in self.__key(u'Tracks'):
+      if 'Track ID' in track_gobj:
+        track = str(track_gobj['Track ID'])
+        if self.__track_ok(track):
+          tracks.append(track)
     return tracks
 
   def music_folder(self):
@@ -294,8 +371,9 @@ def main():
   ##   force sync everything
   ##   paths to be ignored in cleanup under music and playlists
   ##   clean up/remove all files
-
-  ## check if dest is under itunes music directory
+  ##   do not copy/rename files
+  ##   do not dos_convert files
+  ##   do not cleanup/delete music files/directories, ever
 
   ## Count how many deletions would be made on a dry run.
   ## - calculate deletions/additions by number of files in list
@@ -336,6 +414,14 @@ def main():
   args.add_argument('--list', '-l',
                     action='store_true',
                     help='List laylists found in the XML.')
+  args.add_argument('--video',
+                    action='store_true',
+                    default=False,
+                    help='Also export video files. Still limited by --types')
+  args.add_argument('--nocopy',
+                    action='store_true',
+                    default=False,
+                    help='Do not copy files or rewrite names for playlists.')
   
   arg_plists = args.add_mutually_exclusive_group()
   arg_plists.add_argument('--plists', '-p',
@@ -347,6 +433,16 @@ def main():
                           default=False,
                           help='Export all playlists.')
 
+  arg_type = args.add_mutually_exclusive_group()
+  arg_type.add_argument('--types',
+                        nargs='+',
+                        help='What type(s) (extension(s)) of files to export.')
+  arg_type.add_argument('--all-types',
+                        action='store_true',
+                        default=False,
+                        help='Export all types of (audio, by default) file.')
+
+
   global FLAGS
   ## Put a try around this to catch @filename errors?
   FLAGS = args.parse_args()
@@ -354,8 +450,9 @@ def main():
   # If the list option has been given then list playlists and exit.
   if FLAGS.list:
     if not FLAGS.quiet:
-      print 'Parsing XML file.'
-    itxml = tunes_xml(os.path.expanduser(FLAGS.itunes))
+      print 'Parsing XML file for local file types.'
+    itxml = tunes_xml(os.path.expanduser(FLAGS.itunes), types=FLAGS.types,
+                      all_types=FLAGS.all_types, video=FLAGS.video)
     print 'Playlists found:'
     for plist in itxml.playlists():
       qname = '\'%s\'' % plist
@@ -400,8 +497,9 @@ def main():
 
   # Try to parse the XML file.
   if not FLAGS.quiet:
-    print 'Parsing XML file.'
-  itxml = tunes_xml(os.path.expanduser(FLAGS.itunes))
+    print 'Parsing XML file for local file types.'
+  itxml = tunes_xml(os.path.expanduser(FLAGS.itunes), types=FLAGS.types,
+                    all_types=FLAGS.all_types, video=FLAGS.video)
   musicdir = itxml.music_folder()
 
   if not FLAGS.quiet:
@@ -473,9 +571,10 @@ def main():
         # As well as filename rewriting these paths need to be relative
         # to the playlists directory and DOS style paths with backslashes
         # rather than slashes.
-        plist_track = fat32_convert(itxml.track_name(track), musicdir, music)
-        plist_dos = re.sub('/', '\\\\', os.path.relpath(plist_track, plist_dir))
-        plist_file.write('%s\n' % plist_dos)
+        track_name = itxml.track_name(track)
+        track_name = fat32_convert(track_name, musicdir, music)
+        track_name = re.sub('/', '\\\\', os.path.relpath(track_name, plist_dir))
+        plist_file.write('%s\n' % track_name)
       plist_file.close()
   print 'Number of tracks in desired playlists: %d' % len(tracks)
 
