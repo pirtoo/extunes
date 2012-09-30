@@ -636,13 +636,6 @@ def main():
       plist_file.close()
   print 'Number of tracks in desired playlists: %d' % len(tracks)
 
-  if not FLAGS.nocopy:
-    synced_size = 0
-    for track in tracks:
-      # Add up how big the synced size of tracks will be.
-      synced_size += itxml.track_size(track)
-    print ('Size of synced tracks: %s' % bytes2human(synced_size))
-
   if FLAGS.noop:
     print 'noop: not cleaning up old playlists.'
   else:  
@@ -655,6 +648,13 @@ def main():
   if FLAGS.nocopy:
     # Nothing to check, copy or delete. Don't do anything else.
     sys.exit(0)
+
+  else:
+    synced_size = 0
+    for track in tracks:
+      # Add up how big the synced size of tracks will be.
+      synced_size += itxml.track_size(track)
+    print ('Size of synced tracks: %s' % bytes2human(synced_size))
 
   if not FLAGS.quiet:
     print 'Checking tracks.'
