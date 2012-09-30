@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 ###########################################################################
-# extunes.py v0.13.
+# extunes.py v0.14.
 # Copyright 2012 by Peter Radcliffe <pir-code@pir.net>.
 # http://www.pir.net/pir/hacks/extunes.py
 #
@@ -87,8 +87,24 @@ def mk_missing_dirs(direct, stopdir):
     try:
       os.mkdir(direct)
     except (IOError, OSError) as e:
-      error_exit('Failed to delete directory "%s":\n  %s' %
+      error_exit('Failed to create directory "%s":\n  %s' %
                  (full_file, e), code=6)
+
+###########################################################################
+# Make directories from a list.
+def mkdirs(dirs):
+  for path in dirs:
+    if not os.path.isdir(path):
+      if FLAGS.noop and not FLAGS.quiet:
+          print '  noop: not creating "%s".' % path
+      else:
+        if not FLAGS.quiet:
+          print '  Creating "%s".' % path
+        try:
+          os.mkdir(path)
+        except (IOError, OSError) as e:
+          error_exit('Failed to create directory "%s":\n  %s' %
+                     (path, e), code=6)
 
 ###########################################################################
 def clean_tree(base, keep_list):
@@ -143,23 +159,6 @@ def clean_tree(base, keep_list):
                    (full_file, e), code=6)
 
   return (file_count, dir_count)
-
-###########################################################################
-# Make directories from a list.
-def mkdirs(dirs):
-  for path in dirs:
-    if not os.path.isdir(path):
-      if FLAGS.noop and not FLAGS.quiet:
-          print '  noop: not creating "%s".' % path
-      else:
-        if not FLAGS.quiet:
-          print '  Creating "%s".' % path
-        try:
-          os.mkdir(path)
-        except (IOError, OSError) as e:
-          error_exit('Failed to create directory "%s":\n  %s' %
-                     (path, e), code=6)
-
 
 ###########################################################################
 # Print an error to stderr and exit with exit code if one is given.
@@ -395,9 +394,7 @@ def main():
   ## TODO(pir):
 
   ## add command line options:
-  ##   force sync everything
   ##   paths to be ignored in cleanup under music and playlists
-  ##   clean up/remove all files
 
   ## Count how many deletions would be made on a dry run.
   ## - calculate deletions/additions by number of files in list
@@ -406,9 +403,6 @@ def main():
 
   ## Generate a list of local files and a list of to be synced files
   ## and diff, rather than going through the filesystem?
-
-  ## Progress bar optional in quiet mode, # for every 10 files copied.
-
 
   # Command line arguments.
   args = argparse.ArgumentParser(
@@ -430,7 +424,13 @@ def main():
                     default='Music')
   args.add_argument('--quiet', '-q',
                     action='store_true',
+                    default=False,
                     help='Quiet file copying/deleting output')
+  args.add_argument('--progress', '-#',
+                    action='store_true',
+                    default=False,
+                    help='When in quiet mode print a progress bar of one'
+                         ' character per copy of 10 files')
   args.add_argument('--noop', '-n',
                     action='store_true',
                     help='No-op, no operation, dry run')
@@ -443,12 +443,6 @@ def main():
                     action='store_true',
                     default=False,
                     help='Also export video files, still limited by --types')
-  args.add_argument('--nocopy',
-                    action='store_true',
-                    default=False,
-                    help='Do not copy files or rewrite names for playlists.'
-                         ' Used to generate playlist files for existing'
-                         ' tracks')
   args.add_argument('--plists-ignore',
                      nargs='+',
                      default=[],
@@ -459,6 +453,19 @@ def main():
                      default='',
                      help='Prefix to add to the start of the playlist names')
   
+  arg_copy = args.add_mutually_exclusive_group()
+  arg_copy.add_argument('--force',
+                        action='store_true',
+                        default=False,
+                        help='Force tracks to be copied even if they already'
+                             ' exist and are the same size.')
+  arg_copy.add_argument('--nocopy',
+                        action='store_true',
+                        default=False,
+                        help='Do not copy files or rewrite names for playlists.'
+                             ' Used to generate playlist files for existing'
+                             ' tracks')
+
   arg_plists = args.add_mutually_exclusive_group()
   arg_plists.add_argument('--plists', '-p',
                           nargs='+',
@@ -507,13 +514,16 @@ def main():
     args.error('one of the arguments --dest/-d --list/-l is required')
   if len(FLAGS.plists) == 0 and not FLAGS.all_plists:
     args.error('one of the arguments --plists/-p --all-plists/-a is required')
+
   if FLAGS.noop:
     print 'noop: No-op mode, no changes will be made!'
+  elif FLAGS.force:
+    print 'force: files will be copied even if they already exist.'
 
   dest = os.path.expanduser(FLAGS.dest)
   # Error out if the detination doesn't exist.
   if not os.path.isdir(dest):
-    error_exit('dest dir not found: "%s"' % dest, code=5)
+    args.error('Destination directory not found: "%s"' % dest)
   music = os.path.join(dest, FLAGS.music)
   plist_dir = os.path.join(dest, FLAGS.plistdir)
 
@@ -552,8 +562,7 @@ def main():
 
     # If we're not ignoring the playlist check if we want it.
     elif FLAGS.all_plists or plist in FLAGS.plists:
-      tracks = itxml.playlist_tracks(plist)
-      if len(tracks) == 0:
+      if len(itxml.playlist_tracks(plist)) == 0:
         #if not FLAGS.quiet:
         #  print 'Ignoring empty playlist: %s' % plist
         ignored_playlists.append(plist)
@@ -592,7 +601,7 @@ def main():
     plist_tracks = itxml.playlist_tracks(plist)
     tracks = list(set(tracks + plist_tracks))
     # Remove any bad characters that can't be used in filenames.
-    plist_filename = re.sub('/', '-', plist)
+    plist_filename = re.sub('/\\\\', '-', plist)
     # Generate the file name of this playlist.
     plist_filename = os.path.join(plist_dir, '%s%s.m3u' %
                                   (FLAGS.plists_prefix, plist_filename))
@@ -620,7 +629,8 @@ def main():
         track_name = itxml.track_name(track)
         if not FLAGS.nocopy:
           track_name = fat32_convert(track_name, musicdir, music)
-          track_name = re.sub('/', '\\\\', os.path.relpath(track_name, plist_dir))
+          track_name = re.sub('/', '\\\\',
+                              os.path.relpath(track_name, plist_dir))
         plist_file.write('%s\n' % track_name)
       plist_file.close()
   print 'Number of tracks in desired playlists: %d' % len(tracks)
@@ -642,7 +652,7 @@ def main():
       print '  Removed %i files and %i directories.' % (files, dirs)
 
   if FLAGS.nocopy:
-    # Nothing to copy, don't do anything else.
+    # Nothing to check, copy or delete. Don't do anything else.
     sys.exit(0)
 
   if not FLAGS.quiet:
@@ -656,7 +666,7 @@ def main():
     synced_tracks.append(remote_file)
 
     # Check if remote file exists already.
-    if os.path.isfile(remote_file):
+    if not FLAGS.force and os.path.isfile(remote_file):
       # If it exists, compare size with os.path.getsize() before copying.
       try:
         local_size = os.path.getsize(local_file)
@@ -695,15 +705,25 @@ def main():
     else:
       print 'Copying %i remaining tracks.' % remaining_tracks
 
+    count = 0
     for (local_file, remote_file) in to_sync_tracks:
+      count += 1
       if FLAGS.noop:
         if not FLAGS.quiet:
           print ('  noop: not copying "%s"\n   to "%s".' %
                  (local_file, remote_file))
       else:
-        if not FLAGS.quiet:
+        if FLAGS.quiet:
+          if FLAGS.progress:
+            if count % 780 is 0:
+              print '#'
+            elif count % 10 is 0:
+              sys.stdout.write('#')
+              sys.stdout.flush()
+        else:
           print '  Copying "%s"\n   to "%s".' % (local_file, remote_file)
-        # Make the path exist if it doesn't.
+
+        # Make the full path exist if it doesn't already.
         mk_missing_dirs(os.path.dirname(remote_file), music)
         try:
           ## This copy could be switched to the rsync algorithm?
@@ -711,6 +731,10 @@ def main():
         except (IOError, OSError) as e:
           error_exit('Failed to copy to file "%s":\n  %s' %
                      (remote_file, e), code=6)
+
+    # Print a newline after progress printing above.
+    if FLAGS.quiet and FLAGS.progress:
+      print
 
 ###########################################################################
 if __name__ == '__main__':
