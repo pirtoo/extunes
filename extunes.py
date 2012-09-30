@@ -17,7 +17,7 @@
 # are cleaned up and empty directories are removed.
 #
 # Ignores the existence of non-local tracks (those without a size) which
-# are streaming URLs.
+# are streaming URLs and such.
 #
 # Tested with Python 2.6 and 2.7 on OSX.
 # Requires plistlib which is included with Python 2.6 or later.
@@ -59,7 +59,7 @@ def bytes2human(n, format='%(value).4g%(symbol)s'):
 
 ###########################################################################
 # Convert local filename to a fat32 valid filename relative to playlist.
-# This is rather more restictive than it needs to be, which is safer.
+# This is rather more restictive than it needs to be, to be safer/simpler.
 #
 # If we don't lower case it we can have problems with multi-disk
 # albums where the case of the directory is different between iTunes
@@ -223,8 +223,8 @@ class tunes_xml:
     return self.tunes[key]
 
   def playlists(self):
-    # Return a list of playlist names.
-    return self.plist_index.keys()
+    # Return a sorted list of playlist names.
+    return sorted(self.plist_index)
 
   def is_playlist(self, plist_name):
     # Return if a specific playlist name exists or not.
@@ -507,7 +507,7 @@ def main():
   if not FLAGS.quiet:
     print 'Checking music and playlist paths for existence.'
   for path in [plist_dir, music]:
-    if path is "":
+    if not path:
       next
     if not os.path.isdir(path):
       if FLAGS.noop and not FLAGS.quiet:
