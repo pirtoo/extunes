@@ -664,10 +664,10 @@ def main():
   for track in tracks:
     local_file = itxml.track_name(track)
     remote_file = fat32_convert(local_file, musicdir, music)
-    ## We should really add a suffix to the remote name, before the
-    ## suffix, and recheck for a collision (increment suffix if still
-    ## collides).
     if remote_file in synced_tracks:
+      ## We should really add a suffix to the remote name, before the
+      ## filetype, and recheck for a collision (increment suffix if
+      ## still collides).
       error_exit('WARNING: remote filename collision: "%s"' % remote_file)
     # Append the name to the list of all files in the playlists.
     synced_tracks.append(remote_file)
