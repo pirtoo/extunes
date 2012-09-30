@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 ###########################################################################
-# extunes.py v0.12.
+# extunes.py v0.13.
 # Copyright 2012 by Peter Radcliffe <pir-code@pir.net>.
 # http://www.pir.net/pir/hacks/extunes.py
 #
@@ -176,14 +176,14 @@ class tunes_xml:
 
   # Dict entries in playlists and what to flag them as in list mode.
   playlist_flagset = (
-    ['Master', 'A'],
-    ['Music', 'M'],
-    ['Visible', 'N'],
-    ['Movies', 'V'],
-    ['TV Shows', 'T'],
-    ['Purchased Music', 'P'],
-    ['Party Shuffle', 'D'],
-    ['Smart Criteria', 'S'],
+    [u'Master', 'A'],
+    [u'Music', 'M'],
+    [u'Visible', 'N'],
+    [u'Movies', 'V'],
+    [u'TV Shows', 'T'],
+    [u'Purchased Music', 'P'],
+    [u'Party Shuffle', 'D'],
+    [u'Smart Criteria', 'S'],
   )
 
   def __init__(self, xmlfile, types=None, all_types=False, video=False):
@@ -223,11 +223,8 @@ class tunes_xml:
     return self.tunes[key]
 
   def playlists(self):
-    # Generate an iterable list of playlist names.
-    for plist in self.__key(u'Playlists'):
-      if u'Name' not in plist:
-        next
-      yield plist[u'Name']
+    # Return a list of playlist names.
+    return self.plist_index.keys()
 
   def is_playlist(self, plist_name):
     # Return if a specific playlist name exists or not.
@@ -257,10 +254,10 @@ class tunes_xml:
     if not plist_obj:
       return None
     tracks = []
-    if 'Playlist Items' in plist_obj:
-      for track_gobj in plist_obj['Playlist Items']:
-        if 'Track ID' in track_gobj:
-          track = str(track_gobj['Track ID'])
+    if u'Playlist Items' in plist_obj:
+      for track_gobj in plist_obj[u'Playlist Items']:
+        if u'Track ID' in track_gobj:
+          track = str(track_gobj[u'Track ID'])
           if self.__track_ok(track):
             tracks.append(track)
     return tracks
@@ -271,15 +268,15 @@ class tunes_xml:
 
     # If we don't know where the track is or what it is we can't do
     # anything with it.
-    if not 'Location' in track_obj:
+    if not u'Location' in track_obj:
       return False
-    if not 'Kind' in track_obj:
+    if not u'Kind' in track_obj:
       return False
     # if it's protected then we can't play it outside of iTunes.
-    if 'Protected' in track_obj:
+    if u'Protected' in track_obj:
       return False
     # If the track has no size then it isn't local.
-    if not 'Size' in track_obj:
+    if not u'Size' in track_obj:
       return False
 
     # If we are not exporting video files, ignore them.
@@ -295,7 +292,7 @@ class tunes_xml:
       # Purchased MPEG-4 video file
       # QuickTime movie file
       # WAV audio file
-      kind = track_obj['Kind'].lower()
+      kind = track_obj[u'Kind'].lower()
       if ' video ' in kind:
         return False
       if ' movie ' in kind:
@@ -310,7 +307,7 @@ class tunes_xml:
     return True
 
   def __track_obj(self, track):
-  # Take a track id and return a track object.
+    # Take a track id and return a track object.
     try:
       return self.tunes[u'Tracks'][track]
     except:
@@ -322,7 +319,7 @@ class tunes_xml:
     if self.__track_ok(track):
       track_obj = self.__track_obj(track)
       try:
-        result = track_obj['Size']
+        result = track_obj[u'Size']
       except:
         error_exit('Failed to use iTunes XML data for track "%s": %s' %
                    (track, trace_last()), code=4)
@@ -334,16 +331,16 @@ class tunes_xml:
     return urllib.unquote(filename.split('file://localhost')[-1])
 
   def track_name(self, track):
-  # Convert a string track id to a local filename.
+    # Convert a string track id to a local filename.
     try:
-      result = self.__track_obj(track)['Location']
+      result = self.__track_obj(track)[u'Location']
     except:
       error_exit('Failed to use iTunes XML data for track "%s": %s' %
                  (track, trace_last()), code=4)
     return self.name_convert(result)
 
   def track_suffix(self, track):
-  # Convert a string track id to a local filename suffix.
+    # Convert a string track id to a local filename suffix.
     name = self.track_name(track)
     suffix = name.split('.')[-1]
     if suffix is name:
@@ -351,30 +348,30 @@ class tunes_xml:
     return suffix.lower()
 
   def tracks(self):
-  # Return a list of global track ids.
+    # Return a list of global track ids.
     if not self.__has_key(u'Tracks'):
       return []
     tracks = []
     for track in self.__key(u'Tracks'):
       track = str(track)
       track_gobj = self.__key(u'Tracks')[track]
-      if 'Track ID' in track_gobj:
+      if u'Track ID' in track_gobj:
         if self.__track_ok(track):
           tracks.append(track)
     return tracks
 
   def music_folder(self):
-  # Return a converted music folder name.
+    # Return a converted music folder name.
     return self.name_convert(self.__key(u'Music Folder'))
 
   def date(self):
-  # Return the date of the generated XML.
+    # Return the date of the generated XML.
     return self.__key(u'Date')
 
   def version(self):
-  # Return the version number of the generated XML.
-    return '%s.%s' % (self.__key('Major Version'),
-                      self.__key('Minor Version'))
+    # Return the version number of the generated XML.
+    return '%s.%s' % (self.__key(u'Major Version'),
+                      self.__key(u'Minor Version'))
 
 ###########################################################################
 def main():
