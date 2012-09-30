@@ -19,9 +19,14 @@
 # Ignores the existence of non-local tracks (those without a size) which
 # are streaming URLs.
 #
+# Tested with Python 2.6 and 2.7 on OSX.
 # Requires plistlib which is included with Python 2.6 or later.
 # This may work for earlier versions of Python:
 #   http://svn.python.org/projects/python/trunk/Lib/plistlib.py
+# argparse shipped with Python 2.7 or later, on OSX 10.6.* run:
+#   sudo /usr/bin/easy_install-2.6 argparse
+#   sudo chmod -R a+rX /Library/Python/2.6/site-packages
+# or install newer python with macports, etc.
 #
 # WARNING: will remove anything under the music and playlists
 # directories that it isn't syncing on this run!
@@ -270,6 +275,9 @@ class tunes_xml:
       return False
     if not 'Kind' in track_obj:
       return False
+    # if it's protected then we can't play it outside of iTunes.
+    if 'Protected' in track_obj:
+      return False
     # If the track has no size then it isn't local.
     if not 'Size' in track_obj:
       return False
@@ -475,8 +483,8 @@ def main():
       size = 0
       for track in itxml.playlist_tracks(plist):
         size += itxml.track_size(track)
-      print ('  {:<43} {:8d} tracks {:>10} {:>6}'.format(
-             qname, len(itxml.playlist_tracks(plist)), bytes2human(size),
+      print ('  %-43s %8d tracks %10s %6s' %
+             (qname, len(itxml.playlist_tracks(plist)), bytes2human(size),
              itxml.playlist_flags(plist)))
     sys.exit(0)
 
@@ -577,15 +585,18 @@ def main():
     # unique with a set conversion.
     plist_tracks = itxml.playlist_tracks(plist)
     tracks = list(set(tracks + plist_tracks))
+    # Remove any bad characters that can't be used in filenames.
+    plist_filename = re.sub('/', '-', plist)
     # Generate the file name of this playlist.
     plist_filename = os.path.join(plist_dir, '%s%s.m3u' %
-                                  (FLAGS.plists_prefix, plist))
+                                  (FLAGS.plists_prefix, plist_filename))
+
     # Keep a list of all playlist filenames.
     playlist_files.append(plist_filename)
 
     # Create playlist file.
     if FLAGS.noop and not FLAGS.quiet:
-      print 'noop: not writing to "%s"' % plist
+      print 'noop: not writing to "%s"' % plist_filename
     else:
       if not FLAGS.quiet:
         print '  Writing to "%s"' % plist_filename
