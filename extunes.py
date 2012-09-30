@@ -500,13 +500,18 @@ def main():
   # Error out if the detination doesn't exist.
   if not os.path.isdir(dest):
     error_exit('dest dir not found: "%s"' % dest, code=5)
-  music = os.path.join(dest, FLAGS.music)
+  if FLAGS.nocopy:
+    music = ""
+  else:
+    music = os.path.join(dest, FLAGS.music)
   plist_dir = os.path.join(dest, FLAGS.plistdir)
 
   # Make sure playlists and music directories exist.
   if not FLAGS.quiet:
     print 'Checking music and playlist paths for existence.'
   for path in [plist_dir, music]:
+    if path is "":
+      next
     if not os.path.isdir(path):
       if FLAGS.noop and not FLAGS.quiet:
           print '  noop: not creating "%s".' % path
@@ -540,16 +545,16 @@ def main():
   for plist in itxml.playlists():
     # If we have a match, copy the lists.
     if plist in FLAGS.plists_ignore:
-      if not FLAGS.quiet:
-        print 'Playlist in --plist-ignore: %s' % plist
+      #if not FLAGS.quiet:
+      #  print 'Playlist in --plist-ignore: %s' % plist
       ignored_playlists.append(plist)
 
     # If we're not ignoring the playlist check if we want it.
     elif FLAGS.all_plists or plist in FLAGS.plists:
       tracks = itxml.playlist_tracks(plist)
       if len(tracks) == 0:
-        if not FLAGS.quiet:
-          print 'Ignoring empty playlist: %s' % plist
+        #if not FLAGS.quiet:
+        #  print 'Ignoring empty playlist: %s' % plist
         ignored_playlists.append(plist)
       else:
         playlists.append(plist)
