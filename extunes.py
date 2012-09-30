@@ -145,6 +145,23 @@ def clean_tree(base, keep_list):
   return (file_count, dir_count)
 
 ###########################################################################
+# Make directories from a list.
+def mkdirs(dirs):
+  for path in dirs:
+    if not os.path.isdir(path):
+      if FLAGS.noop and not FLAGS.quiet:
+          print '  noop: not creating "%s".' % path
+      else:
+        if not FLAGS.quiet:
+          print '  Creating "%s".' % path
+        try:
+          os.mkdir(path)
+        except (IOError, OSError) as e:
+          error_exit('Failed to create directory "%s":\n  %s' %
+                     (path, e), code=6)
+
+
+###########################################################################
 # Print an error to stderr and exit with exit code if one is given.
 def error_exit(text, code=None):
   sys.stderr.write(sys.argv[0] + ': ' + text + '\n')
@@ -497,29 +514,16 @@ def main():
   # Error out if the detination doesn't exist.
   if not os.path.isdir(dest):
     error_exit('dest dir not found: "%s"' % dest, code=5)
-  if FLAGS.nocopy:
-    music = ""
-  else:
-    music = os.path.join(dest, FLAGS.music)
+  music = os.path.join(dest, FLAGS.music)
   plist_dir = os.path.join(dest, FLAGS.plistdir)
 
   # Make sure playlists and music directories exist.
   if not FLAGS.quiet:
     print 'Checking music and playlist paths for existence.'
-  for path in [plist_dir, music]:
-    if not path:
-      next
-    if not os.path.isdir(path):
-      if FLAGS.noop and not FLAGS.quiet:
-          print '  noop: not creating "%s".' % path
-      else:
-        if not FLAGS.quiet:
-          print '  Creating "%s".' % path
-        try:
-          os.mkdir(path)
-        except (IOError, OSError) as e:
-          error_exit('Failed to create directory "%s":\n  %s' %
-                     (path, e), code=6)
+  if FLAGS.nocopy:
+    mkdirs([plist_dir])
+  else:
+    mkdirs([plist_dir, music])
 
   # Try to parse the XML file.
   if not FLAGS.quiet:
