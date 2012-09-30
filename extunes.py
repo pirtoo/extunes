@@ -591,7 +591,7 @@ def main():
     if not FLAGS.quiet:
       print 'Creating playlists.'
 
-  # Generate a unique list of all tracks required from all playlists
+  # Generate a unique list of all track ids required from all playlists
   # that are to be copied.
   # Also keep track of what playlist files we create.
   tracks = []
@@ -664,6 +664,12 @@ def main():
   for track in tracks:
     local_file = itxml.track_name(track)
     remote_file = fat32_convert(local_file, musicdir, music)
+    ## We should really add a suffix to the remote name, before the
+    ## suffix, and recheck for a collision (increment suffix if still
+    ## collides).
+    if remote_file in synced_tracks:
+      error_exit('WARNING: remote filename collision: "%s"' % remote_file)
+    # Append the name to the list of all files in the playlists.
     synced_tracks.append(remote_file)
 
     # Check if remote file exists already.
