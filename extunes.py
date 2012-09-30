@@ -404,6 +404,7 @@ def main():
   ## Generate a list of local files and a list of to be synced files
   ## and diff, rather than going through the filesystem?
 
+
   # Command line arguments.
   args = argparse.ArgumentParser(
      description='Export playlists and tracks from iTunes(TM).',
