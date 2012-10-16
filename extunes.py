@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 ###########################################################################
-# extunes.py v0.14.
+# extunes.py v0.15.
 # Copyright 2012 by Peter Radcliffe <pir-code@pir.net>.
 # http://www.pir.net/pir/hacks/extunes.py
 #
@@ -621,7 +621,7 @@ def main():
         plist_file = open(plist_filename, 'w')
       except (IOError, OSError) as e:
         error_exit('Failed to open new playlist "%s":\n   %s' %
-                   (path, e), code=6)
+                   (plist_filename, e), code=6)
 
       for track in plist_tracks:
         # As well as filename rewriting these paths need to be relative
