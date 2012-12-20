@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
 ###########################################################################
-# extunes.py v0.15.
+# extunes.py v0.16.
 # Copyright 2012 by Peter Radcliffe <pir-code@pir.net>.
 # http://www.pir.net/pir/hacks/extunes.py
+#
+# Changelist:
+# 0.16: cleaned up fat32_convert and used it on playlist filenames too.
 #
 ###########################################################################
 # Export iTunes(TM) playlists from the XML file and sync a set of
@@ -65,10 +68,22 @@ def bytes2human(n, format='%(value).4g%(symbol)s'):
 # albums where the case of the directory is different between iTunes
 # sets. Simpler to just lowercase everything, id3 tags will still be
 # correct.
-# Also get rid of multiple runs of spaces, confuses some systems.
-def fat32_convert(filename, oldbase, newbase):
-  return re.sub(' +', ' ', re.sub('[^-_/.&%#@a-zA-Z0-9 ]', '',
-     os.path.join(newbase, filename.split(oldbase)[1].lower())))
+def fat32_convert(filename, oldbase=None, newbase=os.sep):
+
+  # If we have a directory prefix to remove, remove it.
+  if oldbase is not None:
+    filename = filename.split(oldbase)[1]
+
+  filename = filename.lower()
+  # Make sure whatever local filesystem we have the seperator is removed.
+  filename = re.sub('[%s]' % os.sep, '-', filename)
+  # Also get rid of multiple runs of spaces, confuses some systems.
+  filename = re.sub(' +', ' ', filename)
+  # Final cleanup of non-fat32 chars.
+  filename = re.sub('[^-_.&%#@a-z0-9: ]', '-', filename)
+
+  return os.path.join(newbase, filename)
+
 
 ###########################################################################
 # Format a list of strings to be quoted and comma seperated.
@@ -601,11 +616,11 @@ def main():
     # unique with a set conversion.
     plist_tracks = itxml.playlist_tracks(plist)
     tracks = list(set(tracks + plist_tracks))
+    print plist
     # Remove any bad characters that can't be used in filenames.
-    plist_filename = re.sub('/\\\\', '-', plist)
-    # Generate the file name of this playlist.
-    plist_filename = os.path.join(plist_dir, '%s%s.m3u' %
-                                  (FLAGS.plists_prefix, plist_filename))
+    plist_filename = fat32_convert('%s%s.m3u' % (FLAGS.plists_prefix, plist),
+                                   newbase=plist_dir)
+    print plist_filename
 
     # Keep a list of all playlist filenames.
     playlist_files.append(plist_filename)
@@ -629,8 +644,9 @@ def main():
         # rather than slashes.
         track_name = itxml.track_name(track)
         if not FLAGS.nocopy:
-          track_name = fat32_convert(track_name, musicdir, music)
-          track_name = re.sub('/', '\\\\',
+          track_name = fat32_convert(track_name, oldbase=musicdir,
+                                     newbase=music)
+          track_name = re.sub(os.sep, '-',
                               os.path.relpath(track_name, plist_dir))
         plist_file.write('%s\n' % track_name)
       plist_file.close()
@@ -663,7 +679,7 @@ def main():
   to_sync_size = 0
   for track in tracks:
     local_file = itxml.track_name(track)
-    remote_file = fat32_convert(local_file, musicdir, music)
+    remote_file = fat32_convert(local_file, oldbase=musicdir, newbase=music)
     if remote_file in synced_tracks:
       ## We should really add a suffix to the remote name, before the
       ## filetype, and recheck for a collision (increment suffix if
