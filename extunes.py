@@ -616,11 +616,9 @@ def main():
     # unique with a set conversion.
     plist_tracks = itxml.playlist_tracks(plist)
     tracks = list(set(tracks + plist_tracks))
-    print plist
     # Remove any bad characters that can't be used in filenames.
     plist_filename = fat32_convert('%s%s.m3u' % (FLAGS.plists_prefix, plist),
                                    newbase=plist_dir)
-    print plist_filename
 
     # Keep a list of all playlist filenames.
     playlist_files.append(plist_filename)
