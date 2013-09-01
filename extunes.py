@@ -424,7 +424,7 @@ def main():
   args = argparse.ArgumentParser(
      description='Export playlists and tracks from iTunes(TM).',
      fromfile_prefix_chars='@',
-     epilog='An option of @filename will interpret arguments from'
+     epilog='An option of @filename will interpret arguments from '
             'filename, one per line.')
 
   args.add_argument('--itunes', '-i',
