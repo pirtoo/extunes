@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 
 ###########################################################################
-# extunes.py v0.16.
+# extunes.py v0.17.
 # Copyright 2012 by Peter Radcliffe <pir-code@pir.net>.
 # http://www.pir.net/pir/hacks/extunes.py
 #
 # Changelist:
 # 0.16: cleaned up fat32_convert and used it on playlist filenames too.
+# 0.17: cemoved extraneous progress print conditional.
+#       changed progress to print every 100 files.
+#       fixed bugs introduced by removing too many characters.
 #
 ###########################################################################
 # Export iTunes(TM) playlists from the XML file and sync a set of
@@ -76,11 +79,13 @@ def fat32_convert(filename, oldbase=None, newbase=os.sep):
 
   filename = filename.lower()
   # Make sure whatever local filesystem we have the seperator is removed.
-  filename = re.sub('[%s]' % os.sep, '-', filename)
+  ## -- Can't do this, breaks paths.
+  #filename = re.sub('[%s]' % os.sep, '-', filename)
   # Also get rid of multiple runs of spaces, confuses some systems.
   filename = re.sub(' +', ' ', filename)
   # Final cleanup of non-fat32 chars.
-  filename = re.sub('[^-_.&%#@a-z0-9: ]', '-', filename)
+  #filename = re.sub('[^_.&%#@a-z0-9: ]', '-', filename)
+  filename = re.sub('[^-_.&%%#@a-z0-9:%s ]' % os.sep, '-', filename)
 
   return os.path.join(newbase, filename)
 
@@ -446,7 +451,7 @@ def main():
                     action='store_true',
                     default=False,
                     help='When in quiet mode print a progress bar of one'
-                         ' character per copy of 10 files')
+                         ' character per copy of 100 files')
   args.add_argument('--noop', '-n',
                     action='store_true',
                     help='No-op, no operation, dry run')
@@ -644,8 +649,11 @@ def main():
         if not FLAGS.nocopy:
           track_name = fat32_convert(track_name, oldbase=musicdir,
                                      newbase=music)
-          track_name = re.sub(os.sep, '-',
-                              os.path.relpath(track_name, plist_dir))
+## Can't do this or it breaks paths.
+#          track_name = re.sub(os.sep, '-',
+#                              os.path.relpath(track_name, plist_dir))
+          track_name = os.path.relpath(track_name, plist_dir)
+
         plist_file.write('%s\n' % track_name)
       plist_file.close()
   print 'Number of tracks in desired playlists: %d' % len(tracks)
@@ -736,9 +744,7 @@ def main():
       else:
         if FLAGS.quiet:
           if FLAGS.progress:
-            if count % 780 is 0:
-              print '#'
-            elif count % 10 is 0:
+            if count % 100 is 0:
               sys.stdout.write('#')
               sys.stdout.flush()
         else:
