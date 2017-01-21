@@ -7,9 +7,12 @@
 #
 # Changelist:
 # 0.16: cleaned up fat32_convert and used it on playlist filenames too.
-# 0.17: cemoved extraneous progress print conditional.
+# 0.17: removed extraneous progress print conditional.
 #       changed progress to print every 100 files.
 #       fixed bugs introduced by removing too many characters.
+# 0.18: switched name_convert to using urlparse.urlsplit to get a directory
+# 0.19: added some playlist handling options, --plist-noclean and
+#       --plist-backlslash
 #
 ###########################################################################
 # Export iTunes(TM) playlists from the XML file and sync a set of
@@ -43,6 +46,7 @@ import argparse
 import copy
 import os
 import urllib
+import urlparse
 import plistlib
 import re
 import shutil
@@ -65,7 +69,7 @@ def bytes2human(n, format='%(value).4g%(symbol)s'):
 
 ###########################################################################
 # Convert local filename to a fat32 valid filename relative to playlist.
-# This is rather more restictive than it needs to be, to be safer/simpler.
+# This is rather more restrictive than it needs to be, to be safer/simpler.
 #
 # If we don't lower case it we can have problems with multi-disk
 # albums where the case of the directory is different between iTunes
@@ -84,8 +88,7 @@ def fat32_convert(filename, oldbase=None, newbase=os.sep):
   # Also get rid of multiple runs of spaces, confuses some systems.
   filename = re.sub(' +', ' ', filename)
   # Final cleanup of non-fat32 chars.
-  #filename = re.sub('[^_.&%#@a-z0-9: ]', '-', filename)
-  filename = re.sub('[^-_.&%%#@a-z0-9:%s ]' % os.sep, '-', filename)
+  filename = re.sub('[^-_.&%%#@a-z0-9:\\/%s ]' % os.sep, '-', filename)
 
   return os.path.join(newbase, filename)
 
@@ -364,7 +367,9 @@ class tunes_xml:
       return 0
 
   def name_convert(self, filename):
-    return urllib.unquote(filename.split('file://localhost')[-1])
+    # Pull the path section out of a returned URL. Assume it is local
+    # because the rest of the script won't work otherwise.
+    return urllib.unquote(urlparse.urlsplit(filename)[2])
 
   def track_name(self, track):
     # Convert a string track id to a local filename.
@@ -465,14 +470,22 @@ def main():
                     default=False,
                     help='Also export video files, still limited by --types')
   args.add_argument('--plists-ignore',
-                     nargs='+',
-                     default=[],
-                     metavar='PLAYLIST',
-                     help='List of names of playlists to never export')
+                    nargs='+',
+                    default=[],
+                    metavar='PLAYLIST',
+                    help='List of names of playlists to never export')
   args.add_argument('--plists-prefix',
-                     metavar='PREFIX',
-                     default='',
-                     help='Prefix to add to the start of the playlist names')
+                    metavar='PREFIX',
+                    default='',
+                    help='Prefix to add to the start of the playlist names')
+  args.add_argument('--plists-noclean',
+                    action='store_true',
+                    default=False,
+                    help='Do not clean up the Playlist directory')
+  args.add_argument('--plists-backslash',
+                    action='store_true',
+                    default=False,
+                    help='Use blackslash as the seperator in playlists')
   
   arg_copy = args.add_mutually_exclusive_group()
   arg_copy.add_argument('--force',
@@ -622,8 +635,9 @@ def main():
     plist_tracks = itxml.playlist_tracks(plist)
     tracks = list(set(tracks + plist_tracks))
     # Remove any bad characters that can't be used in filenames.
-    plist_filename = fat32_convert('%s%s.m3u' % (FLAGS.plists_prefix, plist),
-                                   newbase=plist_dir)
+    plist_filename = fat32_convert('%s%s.m3u' % (FLAGS.plists_prefix,
+                                                 plist),
+                                                 newbase=plist_dir)
 
     # Keep a list of all playlist filenames.
     playlist_files.append(plist_filename)
@@ -636,6 +650,9 @@ def main():
         print '  Writing to "%s"' % plist_filename
       # Try to write the m3u playlist file out.
       try:
+        # Opening existing files with 'w' on fat32 devices fails on osx.
+        if os.path.exists(plist_filename):
+          os.remove(plist_filename)
         plist_file = open(plist_filename, 'w')
       except (IOError, OSError) as e:
         error_exit('Failed to open new playlist "%s":\n   %s' %
@@ -649,10 +666,9 @@ def main():
         if not FLAGS.nocopy:
           track_name = fat32_convert(track_name, oldbase=musicdir,
                                      newbase=music)
-## Can't do this or it breaks paths.
-#          track_name = re.sub(os.sep, '-',
-#                              os.path.relpath(track_name, plist_dir))
           track_name = os.path.relpath(track_name, plist_dir)
+          if FLAGS.plists_backslash and os.sep != '\\':
+            track_name = track_name.replace(os.sep, '\\')
 
         plist_file.write('%s\n' % track_name)
       plist_file.close()
@@ -660,6 +676,8 @@ def main():
 
   if FLAGS.noop:
     print 'noop: not cleaning up old playlists.'
+  elif FLAGS.plists_noclean:
+    print 'Not cleaning up old playlists.'
   else:  
     if not FLAGS.quiet:
       print 'Cleaning up old playlists.'
