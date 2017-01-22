@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 ###########################################################################
-# extunes.py v0.17.
-# Copyright 2012 by Peter Radcliffe <pir-code@pir.net>.
+# extunes.py v0.20.
+# Copyright 2012-2017 Peter Radcliffe <pir-code@pir.net>.
 # http://www.pir.net/pir/hacks/extunes.py
 #
 # Changelist:
@@ -13,6 +13,15 @@
 # 0.18: switched name_convert to using urlparse.urlsplit to get a directory
 # 0.19: added some playlist handling options, --plist-noclean and
 #       --plist-backlslash
+# 0.20: fixed typo in help output. Moved not changing playlist content
+#       to it's own option, --plist-nomunge.
+#       Added the --plist-extm3u option to start playlist files with the
+#       line "#EXTM3U".
+#       Added the --tracklist option to output a list of tracks in playlist
+#       to a file.
+#       Added the --nolowercase option to not lowercase filenames in
+#       playlists, in case you're syncing files outside this script and
+#       to a destinattion filesystem that doesn't remove case.
 #
 ###########################################################################
 # Export iTunes(TM) playlists from the XML file and sync a set of
@@ -81,14 +90,16 @@ def fat32_convert(filename, oldbase=None, newbase=os.sep):
   if oldbase is not None:
     filename = filename.split(oldbase)[1]
 
-  filename = filename.lower()
+  if not FLAGS.nolowercase:
+    filename = filename.lower()
+
   # Make sure whatever local filesystem we have the seperator is removed.
   ## -- Can't do this, breaks paths.
   #filename = re.sub('[%s]' % os.sep, '-', filename)
   # Also get rid of multiple runs of spaces, confuses some systems.
   filename = re.sub(' +', ' ', filename)
   # Final cleanup of non-fat32 chars.
-  filename = re.sub('[^-_.&%%#@a-z0-9:\\/%s ]' % os.sep, '-', filename)
+  filename = re.sub('[^-_.&%%#@a-zA-Z0-9:\\/%s ]' % os.sep, '-', filename)
 
   return os.path.join(newbase, filename)
 
@@ -464,7 +475,7 @@ def main():
                     help='Destination directory')
   args.add_argument('--list', '-l',
                     action='store_true',
-                    help='List laylists found in the XML')
+                    help='List playlists found in the XML')
   args.add_argument('--video',
                     action='store_true',
                     default=False,
@@ -486,6 +497,26 @@ def main():
                     action='store_true',
                     default=False,
                     help='Use blackslash as the seperator in playlists')
+  args.add_argument('--plist-nomunge',
+                    action='store_true',
+                    default=False,
+                    help='Do not rewrite names for tracks in playlists.'
+                    ' Used to generate playlist files for existing'
+                    ' tracks')
+  args.add_argument('--plist-extm3u',
+                    action='store_true',
+                    default=False,
+                    help='Add "#EXTM3U" to the start of playlist files.'
+                    ' Helps some devices detect playlist type')
+  args.add_argument('--tracklist',
+                    metavar='LISTFILE',
+                    default='',
+                    help='Store the list of track filenames in all playlists'
+                    ' to a file given to this option')
+  args.add_argument('--nolowercase',
+                    action='store_true',
+                    default=False,
+                    help="Don't lower case filenames in playlists")
   
   arg_copy = args.add_mutually_exclusive_group()
   arg_copy.add_argument('--force',
@@ -496,7 +527,7 @@ def main():
   arg_copy.add_argument('--nocopy',
                         action='store_true',
                         default=False,
-                        help='Do not copy files or rewrite names for playlists.'
+                        help='Do not copy files for playlists.'
                              ' Used to generate playlist files for existing'
                              ' tracks')
 
@@ -624,55 +655,60 @@ def main():
     if not FLAGS.quiet:
       print 'Creating playlists.'
 
-  # Generate a unique list of all track ids required from all playlists
-  # that are to be copied.
-  # Also keep track of what playlist files we create.
-  tracks = []
-  playlist_files = []
-  for plist in playlists:
-    # Add the tracks from this playlist to the general list, keeping it
-    # unique with a set conversion.
-    plist_tracks = itxml.playlist_tracks(plist)
-    tracks = list(set(tracks + plist_tracks))
-    # Remove any bad characters that can't be used in filenames.
-    plist_filename = fat32_convert('%s%s.m3u' % (FLAGS.plists_prefix,
-                                                 plist),
-                                                 newbase=plist_dir)
+    # Generate a unique list of all track ids required from all playlists
+    # that are to be copied.
+    # Also keep track of what playlist files we create.
+    tracks = []
+    playlist_files = []
+    for plist in playlists:
+      # Add the tracks from this playlist to the general list, keeping it
+      # unique with a set conversion.
+      plist_tracks = itxml.playlist_tracks(plist)
+      tracks = list(set(tracks + plist_tracks))
+      # Remove any bad characters that can't be used in filenames.
+      plist_filename = fat32_convert('%s%s.m3u' % (FLAGS.plists_prefix,
+                                                   plist),
+                                                   newbase=plist_dir)
 
-    # Keep a list of all playlist filenames.
-    playlist_files.append(plist_filename)
+      # Keep a list of all playlist filenames.
+      playlist_files.append(plist_filename)
 
-    # Create playlist file.
-    if FLAGS.noop and not FLAGS.quiet:
-      print 'noop: not writing to "%s"' % plist_filename
-    else:
-      if not FLAGS.quiet:
-        print '  Writing to "%s"' % plist_filename
-      # Try to write the m3u playlist file out.
-      try:
-        # Opening existing files with 'w' on fat32 devices fails on osx.
-        if os.path.exists(plist_filename):
-          os.remove(plist_filename)
-        plist_file = open(plist_filename, 'w')
-      except (IOError, OSError) as e:
-        error_exit('Failed to open new playlist "%s":\n   %s' %
-                   (plist_filename, e), code=6)
+      # Create playlist file.
+      if FLAGS.noop and not FLAGS.quiet:
+        print 'noop: not writing to "%s"' % plist_filename
+      else:
+        if not FLAGS.quiet:
+          print '  Writing to "%s"' % plist_filename
+        # Try to write the m3u playlist file out.
+        try:
+          # Opening existing files with 'w' on fat32 devices fails on osx.
+          if os.path.exists(plist_filename):
+            os.remove(plist_filename)
+          plist_file = open(plist_filename, 'w')
+        except (IOError, OSError) as e:
+          error_exit('Failed to open new playlist "%s":\n   %s' %
+                     (plist_filename, e), code=6)
 
-      for track in plist_tracks:
-        # As well as filename rewriting these paths need to be relative
-        # to the playlists directory and DOS style paths with backslashes
-        # rather than slashes.
-        track_name = itxml.track_name(track)
-        if not FLAGS.nocopy:
-          track_name = fat32_convert(track_name, oldbase=musicdir,
-                                     newbase=music)
-          track_name = os.path.relpath(track_name, plist_dir)
+        # Write out the #EXTM3U line to help some players identify
+        # the playlist type, if the option is on.
+        if FLAGS.plist_extm3u:
+          plist_file.write('#EXTM3U\n')
+        
+        for track in plist_tracks:
+          # As well as filename rewriting these paths need to be relative
+          # to the playlists directory and DOS style paths with backslashes
+          # rather than slashes.
+          track_name = itxml.track_name(track)
+          if not FLAGS.plist_nomunge:
+            track_name = fat32_convert(track_name, oldbase=musicdir,
+                                       newbase=music)
+            track_name = os.path.relpath(track_name, plist_dir)
           if FLAGS.plists_backslash and os.sep != '\\':
             track_name = track_name.replace(os.sep, '\\')
 
-        plist_file.write('%s\n' % track_name)
-      plist_file.close()
-  print 'Number of tracks in desired playlists: %d' % len(tracks)
+          plist_file.write('%s\n' % track_name)
+        plist_file.close()
+    print 'Number of tracks in desired playlists: %d' % len(tracks)
 
   if FLAGS.noop:
     print 'noop: not cleaning up old playlists.'
@@ -685,50 +721,76 @@ def main():
     if not FLAGS.quiet:
       print '  Removed %i files and %i directories.' % (files, dirs)
 
-  if FLAGS.nocopy:
+  if FLAGS.nocopy and FLAGS.tracklist == '':
     # Nothing to check, copy or delete. Don't do anything else.
     sys.exit(0)
 
-  else:
+  if not FLAGS.quiet:
     synced_size = 0
     for track in tracks:
       # Add up how big the synced size of tracks will be.
       synced_size += itxml.track_size(track)
     print ('Size of synced tracks: %s' % bytes2human(synced_size))
 
-  if not FLAGS.quiet:
-    print 'Checking tracks.'
+    if not FLAGS.nocopy:
+      print 'Checking tracks.'
+
+  if FLAGS.tracklist != '':
+    # We want to write out all track filenames to a file
+    print 'Writing out list of track filenames to:\n   %s' % FLAGS.tracklist
+    try:
+      # Opening existing files with 'w' on fat32 devices fails on osx.
+      if os.path.exists(FLAGS.tracklist):
+        os.remove(FLAGS.tracklist)
+      tracklist_file = open(FLAGS.tracklist, 'w')
+    except (IOError, OSError) as e:
+      error_exit('Failed to open tracklist "%s":\n   %s' %
+                 (FLAGS.tracklist, e), code=6)
+
   synced_tracks = []
   to_sync_tracks = []
   to_sync_size = 0
   for track in tracks:
     local_file = itxml.track_name(track)
     remote_file = fat32_convert(local_file, oldbase=musicdir, newbase=music)
-    if remote_file in synced_tracks:
-      ## We should really add a suffix to the remote name, before the
-      ## filetype, and recheck for a collision (increment suffix if
-      ## still collides).
-      error_exit('WARNING: remote filename collision: "%s"' % remote_file)
-    # Append the name to the list of all files in the playlists.
-    synced_tracks.append(remote_file)
 
-    # Check if remote file exists already.
-    if not FLAGS.force and os.path.isfile(remote_file):
-      # If it exists, compare size with os.path.getsize() before copying.
-      try:
-        local_size = os.path.getsize(local_file)
-        remote_size = os.path.getsize(remote_file)
-      except (IOError, OSError) as e:
-        error_exit('Failed to get filesize: %s' % e)
-      else:
-        if local_size == remote_size:
-          # File exists and is the same size, skip it.
-          continue
+    if FLAGS.tracklist != '':
+      tracklist_file.write('%s\n' % local_file)
 
-    # If the file doesn't exist or the filesize doesn't match
-    # list the file to be copied.
-    to_sync_tracks.append((local_file, remote_file))
-    to_sync_size += itxml.track_size(track)
+    if not FLAGS.nocopy:
+      if remote_file in synced_tracks:
+        ## We should really add a suffix to the remote name, before the
+        ## filetype, and recheck for a collision (increment suffix if
+        ## still collides).
+        error_exit('WARNING: remote filename collision: "%s"' % remote_file)
+      # Append the name to the list of all files in the playlists.
+      synced_tracks.append(remote_file)
+
+      # Check if remote file exists already.
+      if not FLAGS.force and os.path.isfile(remote_file):
+        # If it exists, compare size with os.path.getsize() before copying.
+        try:
+          local_size = os.path.getsize(local_file)
+          remote_size = os.path.getsize(remote_file)
+        except (IOError, OSError) as e:
+          error_exit('Failed to get filesize: %s' % e)
+        else:
+          if local_size == remote_size:
+            # File exists and is the same size, skip it.
+            continue
+
+      # If the file doesn't exist or the filesize doesn't match
+      # list the file to be copied.
+      to_sync_tracks.append((local_file, remote_file))
+      to_sync_size += itxml.track_size(track)
+
+  # finished writing out track names to a file
+  tracklist_file.close()
+
+  if FLAGS.nocopy:
+    # Nothing to check, copy or delete. Don't do anything else.
+    # We only got this far to write out track names.
+    sys.exit(0)
 
   print ('Size of tracks to sync: %s' % bytes2human(to_sync_size))
 
