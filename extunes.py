@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 ###########################################################################
 # extunes.py v0.20.
@@ -22,6 +22,10 @@
 #       Added the --nolowercase option to not lowercase filenames in
 #       playlists, in case you're syncing files outside this script and
 #       to a destinattion filesystem that doesn't remove case.
+# 0.21: removed nomunge option from preventing fat32 rewrites entirely
+#       to keep path rewrites.
+#       Replaced print with print() statements for python3 compatability.
+#       Fixed urllib references to work with python 2 or 3.
 #
 ###########################################################################
 # Export iTunes(TM) playlists from the XML file and sync a set of
@@ -46,6 +50,8 @@
 #   sudo chmod -R a+rX /Library/Python/2.6/site-packages
 # or install newer python with macports, etc.
 #
+# 0.21 tested with Python 3.7.2 on OSX.
+#
 # WARNING: will remove anything under the music and playlists
 # directories that it isn't syncing on this run!
 #
@@ -54,13 +60,18 @@
 import argparse
 import copy
 import os
-import urllib
-import urlparse
 import plistlib
 import re
 import shutil
 import sys
 import traceback
+
+try:
+    from urlparse import urlsplit
+    from urllib import unquote
+except ImportError:
+    from urllib.parse import urlsplit
+    from urllib.parse import unquote
 
 ###########################################################################
 # Convert a number of bytes into something human readable.
@@ -93,13 +104,14 @@ def fat32_convert(filename, oldbase=None, newbase=os.sep):
   if not FLAGS.nolowercase:
     filename = filename.lower()
 
-  # Make sure whatever local filesystem we have the seperator is removed.
-  ## -- Can't do this, breaks paths.
-  #filename = re.sub('[%s]' % os.sep, '-', filename)
-  # Also get rid of multiple runs of spaces, confuses some systems.
-  filename = re.sub(' +', ' ', filename)
-  # Final cleanup of non-fat32 chars.
-  filename = re.sub('[^-_.&%%#@a-zA-Z0-9:\\/%s ]' % os.sep, '-', filename)
+  if not FLAGS.plist_nomunge:
+    # Make sure whatever local filesystem we have the seperator is removed.
+    ## -- Can't do this, breaks paths.
+    #filename = re.sub('[%s]' % os.sep, '-', filename)
+    # Also get rid of multiple runs of spaces, confuses some systems.
+    filename = re.sub(' +', ' ', filename)
+    # Final cleanup of non-fat32 chars.
+    filename = re.sub('[^-_.&%%#@a-zA-Z0-9:\\/%s ]' % os.sep, '-', filename)
 
   return os.path.join(newbase, filename)
 
@@ -117,7 +129,7 @@ def quote_list(text_list):
 def mk_missing_dirs(direct, stopdir):
   if direct != stopdir and not os.path.isdir(direct):
     mk_missing_dirs(os.path.dirname(direct), stopdir)
-    #print 'Making directory %s' % direct
+    #print('Making directory %s' % direct)
     try:
       os.mkdir(direct)
     except (IOError, OSError) as e:
@@ -130,10 +142,10 @@ def mkdirs(dirs):
   for path in dirs:
     if not os.path.isdir(path):
       if FLAGS.noop and not FLAGS.quiet:
-          print '  noop: not creating "%s".' % path
+          print('  noop: not creating "%s".' % path)
       else:
         if not FLAGS.quiet:
-          print '  Creating "%s".' % path
+          print('  Creating "%s".' % path)
         try:
           os.mkdir(path)
         except (IOError, OSError) as e:
@@ -157,7 +169,7 @@ def clean_tree(base, keep_list):
       # if the file isn't in the list, delete it.
       if full_file not in keep_list:
         if not FLAGS.quiet:
-          print '  Deleting file "%s"' % full_file
+          print('  Deleting file "%s"' % full_file)
         file_count += 1
         files.remove(file)
         try:
@@ -184,7 +196,7 @@ def clean_tree(base, keep_list):
         continue
 
       if not FLAGS.quiet:
-        print '  Deleting directory "%s"' % root
+        print('  Deleting directory "%s"' % root)
       dir_count += 1      
       try:
         os.rmdir(root)
@@ -239,13 +251,27 @@ class tunes_xml:
   def __init__(self, xmlfile, types=None, all_types=False, video=False):
     # Init and parse the XML.
     try:
-      self.tunes = plistlib.readPlist(xmlfile)
+      f = open(xmlfile, 'rb')
+    except IOError as e:
+      error_exit('Cannot open "%s": %s' % (FLAGS.itunes, e), code=4)
+    except:
+      # Yes, yes, this should raise a new exception. Don't care.
+      error_exit('Failed to open iTunes XML file "%s":\n  %s' %
+                 (FLAGS.itunes, trace_last()), code=4)
+
+    try:
+      if sys.version_info[0] == 3:
+        self.tunes = plistlib.load(f)
+      else:
+        self.tunes = plistlib.readPlist(f)
     except IOError as e:
       error_exit('Cannot open "%s": %s' % (FLAGS.itunes, e), code=4)
     except:
       # Yes, yes, this should raise a new exception. Don't care.
       error_exit('Failed to parse iTunes XML file "%s":\n  %s' %
                  (FLAGS.itunes, trace_last()), code=4)
+
+    f.close()
 
     # Store what type(s) of files to use.
     if types is None:
@@ -380,7 +406,7 @@ class tunes_xml:
   def name_convert(self, filename):
     # Pull the path section out of a returned URL. Assume it is local
     # because the rest of the script won't work otherwise.
-    return urllib.unquote(urlparse.urlsplit(filename)[2])
+    return unquote(urlsplit(filename)[2])
 
   def track_name(self, track):
     # Convert a string track id to a local filename.
@@ -503,6 +529,12 @@ def main():
                     help='Do not rewrite names for tracks in playlists.'
                     ' Used to generate playlist files for existing'
                     ' tracks')
+  args.add_argument('--plist-norebase',
+                    action='store_true',
+                    default=False,
+                    help='Do not rebase the track names in playlists.'
+                    ' Used to generate playlist files for existing'
+                    ' tracks with the full path of the file')
   args.add_argument('--plist-extm3u',
                     action='store_true',
                     default=False,
@@ -560,16 +592,16 @@ def main():
   # If the list option has been given then list playlists and exit.
   if FLAGS.list:
     if not FLAGS.quiet:
-      print 'Parsing XML file for local file types.'
+      print('Parsing XML file for local file types.')
     itxml = tunes_xml(os.path.expanduser(FLAGS.itunes), types=FLAGS.types,
                       all_types=FLAGS.all_types, video=FLAGS.video)
-    print 'Playlists found:'
+    print('Playlists found:')
     for plist in itxml.playlists():
       qname = '\'%s\'' % plist
       size = 0
       for track in itxml.playlist_tracks(plist):
         size += itxml.track_size(track)
-      print ('  %-43s %8d tracks %10s %6s' %
+      print('  %-43s %8d tracks %10s %6s' %
              (qname, len(itxml.playlist_tracks(plist)), bytes2human(size),
              itxml.playlist_flags(plist)))
     sys.exit(0)
@@ -581,9 +613,9 @@ def main():
     args.error('one of the arguments --plists/-p --all-plists/-a is required')
 
   if FLAGS.noop:
-    print 'noop: No-op mode, no changes will be made!'
+    print('noop: No-op mode, no changes will be made!')
   elif FLAGS.force:
-    print 'force: files will be copied even if they already exist.'
+    print('force: files will be copied even if they already exist.')
 
   dest = os.path.expanduser(FLAGS.dest)
   # Error out if the detination doesn't exist.
@@ -591,10 +623,13 @@ def main():
     args.error('Destination directory not found: "%s"' % dest)
   music = os.path.join(dest, FLAGS.music)
   plist_dir = os.path.join(dest, FLAGS.plistdir)
+  if not FLAGS.quiet:
+    print('  Music var: %s' % music)
+    print('  plist dir: %s' % plist_dir)
 
   # Make sure playlists and music directories exist.
   if not FLAGS.quiet:
-    print 'Checking music and playlist paths for existence.'
+    print('Checking music and playlist paths for existence.')
   if FLAGS.nocopy:
     mkdirs([plist_dir])
   else:
@@ -602,7 +637,7 @@ def main():
 
   # Try to parse the XML file.
   if not FLAGS.quiet:
-    print 'Parsing XML file for local file types.'
+    print('Parsing XML file for local file types.')
   itxml = tunes_xml(os.path.expanduser(FLAGS.itunes), types=FLAGS.types,
                     all_types=FLAGS.all_types, video=FLAGS.video)
   musicdir = itxml.music_folder()
@@ -610,9 +645,9 @@ def main():
   if not FLAGS.quiet:
     dbdate = itxml.date()
     dbver = itxml.version()
-    print 'XML file version %s, date %s' % (dbver, dbdate)
-    print 'Music dir: %s' % musicdir
-    print 'Number of tracks in the db: %d\n' % len(itxml.tracks())
+    print('XML file version %s, date %s' % (dbver, dbdate))
+    print('Music dir: %s' % musicdir)
+    print('Number of tracks in the db: %d\n' % len(itxml.tracks()))
 
   # Go through all the possible playlists and match against the
   # ones we want to export that aren't empty and aren't being ignored.
@@ -622,14 +657,14 @@ def main():
     # If we have a match, copy the lists.
     if plist in FLAGS.plists_ignore:
       #if not FLAGS.quiet:
-      #  print 'Playlist in --plist-ignore: %s' % plist
+      #  print('Playlist in --plist-ignore: %s' % plist)
       ignored_playlists.append(plist)
 
     # If we're not ignoring the playlist check if we want it.
     elif FLAGS.all_plists or plist in FLAGS.plists:
       if len(itxml.playlist_tracks(plist)) == 0:
         #if not FLAGS.quiet:
-        #  print 'Ignoring empty playlist: %s' % plist
+        #  print('Ignoring empty playlist: %s' % plist)
         ignored_playlists.append(plist)
       else:
         playlists.append(plist)
@@ -643,17 +678,17 @@ def main():
     for plist in playlists:
       missing_playlists.remove(plist)
 
-  print 'Playlist(s) to be copied: %s' % quote_list(playlists)
+  print('Playlist(s) to be copied: %s' % quote_list(playlists))
   if missing_playlists:
-    print 'Playlist(s) not found: %s' % quote_list(missing_playlists)
+    print('Playlist(s) not found: %s' % quote_list(missing_playlists))
   if ignored_playlists:
-    print 'Playlist(s) ignored: %s' % quote_list(ignored_playlists)
+    print('Playlist(s) ignored: %s' % quote_list(ignored_playlists))
 
   if FLAGS.noop:
-    print 'noop: not creating playlists.'
+    print('noop: not creating playlists.')
   else:
     if not FLAGS.quiet:
-      print 'Creating playlists.'
+      print('Creating playlists.')
 
     # Generate a unique list of all track ids required from all playlists
     # that are to be copied.
@@ -675,10 +710,10 @@ def main():
 
       # Create playlist file.
       if FLAGS.noop and not FLAGS.quiet:
-        print 'noop: not writing to "%s"' % plist_filename
+        print('noop: not writing to "%s"' % plist_filename)
       else:
         if not FLAGS.quiet:
-          print '  Writing to "%s"' % plist_filename
+          print('  Writing to "%s"' % plist_filename)
         # Try to write the m3u playlist file out.
         try:
           # Opening existing files with 'w' on fat32 devices fails on osx.
@@ -699,27 +734,27 @@ def main():
           # to the playlists directory and DOS style paths with backslashes
           # rather than slashes.
           track_name = itxml.track_name(track)
-          if not FLAGS.plist_nomunge:
-            track_name = fat32_convert(track_name, oldbase=musicdir,
-                                       newbase=music)
+          track_name = fat32_convert(track_name, oldbase=musicdir,
+                                     newbase=music)
+          if not FLAGS.plist_norebase:
             track_name = os.path.relpath(track_name, plist_dir)
           if FLAGS.plists_backslash and os.sep != '\\':
             track_name = track_name.replace(os.sep, '\\')
 
           plist_file.write('%s\n' % track_name)
         plist_file.close()
-    print 'Number of tracks in desired playlists: %d' % len(tracks)
+    print('Number of tracks in desired playlists: %d' % len(tracks))
 
   if FLAGS.noop:
-    print 'noop: not cleaning up old playlists.'
+    print('noop: not cleaning up old playlists.')
   elif FLAGS.plists_noclean:
-    print 'Not cleaning up old playlists.'
+    print('Not cleaning up old playlists.')
   else:  
     if not FLAGS.quiet:
-      print 'Cleaning up old playlists.'
+      print('Cleaning up old playlists.')
     (files, dirs) = clean_tree(plist_dir, playlist_files)
     if not FLAGS.quiet:
-      print '  Removed %i files and %i directories.' % (files, dirs)
+      print('  Removed %i files and %i directories.' % (files, dirs))
 
   if FLAGS.nocopy and FLAGS.tracklist == '':
     # Nothing to check, copy or delete. Don't do anything else.
@@ -730,14 +765,14 @@ def main():
     for track in tracks:
       # Add up how big the synced size of tracks will be.
       synced_size += itxml.track_size(track)
-    print ('Size of synced tracks: %s' % bytes2human(synced_size))
+    print('Size of synced tracks: %s' % bytes2human(synced_size))
 
     if not FLAGS.nocopy:
-      print 'Checking tracks.'
+      print('Checking tracks.')
 
   if FLAGS.tracklist != '':
     # We want to write out all track filenames to a file
-    print 'Writing out list of track filenames to:\n   %s' % FLAGS.tracklist
+    print('Writing out list of track filenames to:\n   %s' % FLAGS.tracklist)
     try:
       # Opening existing files with 'w' on fat32 devices fails on osx.
       if os.path.exists(FLAGS.tracklist):
@@ -792,34 +827,34 @@ def main():
     # We only got this far to write out track names.
     sys.exit(0)
 
-  print ('Size of tracks to sync: %s' % bytes2human(to_sync_size))
+  print('Size of tracks to sync: %s' % bytes2human(to_sync_size))
 
   # Find tracks that are not on the full list and delete them.
   ## Fix clean_tree so it can run in noop.
   if FLAGS.noop:
-    print 'noop: not checking files and directories to remove.'
+    print('noop: not checking files and directories to remove.')
   else:
-    print 'Checking files and directories to remove.'
+    print('Checking files and directories to remove.')
     (files, dirs) = clean_tree(music, synced_tracks)
-    print '  Removed %i file and %i directories.' % (files, dirs)
+    print('  Removed %i file and %i directories.' % (files, dirs))
 
   # Now that we've freed up whatever disk space can be by deleting things
   # copy any remaining tracks that are needed.
   remaining_tracks = len(to_sync_tracks)
   if remaining_tracks is 0:
-    print 'No tracks to copy.'
+    print('No tracks to copy.')
   else:
     if FLAGS.noop:
-      print 'noop: not copying %i remaining tracks.' % remaining_tracks
+      print('noop: not copying %i remaining tracks.' % remaining_tracks)
     else:
-      print 'Copying %i remaining tracks.' % remaining_tracks
+      print('Copying %i remaining tracks.' % remaining_tracks)
 
     count = 0
     for (local_file, remote_file) in to_sync_tracks:
       count += 1
       if FLAGS.noop:
         if not FLAGS.quiet:
-          print ('  noop: not copying "%s"\n   to "%s".' %
+          print('  noop: not copying "%s"\n   to "%s".' %
                  (local_file, remote_file))
       else:
         if FLAGS.quiet:
@@ -828,7 +863,7 @@ def main():
               sys.stdout.write('#')
               sys.stdout.flush()
         else:
-          print '  Copying "%s"\n   to "%s".' % (local_file, remote_file)
+          print('  Copying "%s"\n   to "%s".' % (local_file, remote_file))
 
         # Make the full path exist if it doesn't already.
         mk_missing_dirs(os.path.dirname(remote_file), music)
@@ -841,7 +876,7 @@ def main():
 
     # Print a newline after progress printing above.
     if FLAGS.quiet and FLAGS.progress:
-      print
+      print()
 
 ###########################################################################
 if __name__ == '__main__':
