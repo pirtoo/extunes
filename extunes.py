@@ -841,7 +841,7 @@ def main():
   # Now that we've freed up whatever disk space can be by deleting things
   # copy any remaining tracks that are needed.
   remaining_tracks = len(to_sync_tracks)
-  if remaining_tracks is 0:
+  if remaining_tracks == 0:
     print('No tracks to copy.')
   else:
     if FLAGS.noop:
@@ -859,7 +859,7 @@ def main():
       else:
         if FLAGS.quiet:
           if FLAGS.progress:
-            if count % 100 is 0:
+            if count % 100 == 0:
               sys.stdout.write('#')
               sys.stdout.flush()
         else:
