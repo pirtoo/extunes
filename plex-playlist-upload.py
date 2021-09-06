@@ -42,7 +42,7 @@ def playlist_file(filename, tracks):
       if line in tracks:
         items.append(tracks[line])
       else:
-        print('Not found: %s' % line)
+        print('\n  Not found in plex library: %s' % line)
   return (i, items)
 
 
@@ -87,23 +87,24 @@ def main():
       if items != plex_items:
         # Differences between the local playlist and plex
         updated+=1
-        print('  Updating playlist contents from local.')
-        playlist.removeItems(plex_items)
-        playlist.addItems(items)
-        if not set(plex_items).symmetric_difference(set(items)):
-          # The API doesn't seem to let you add duplicates in one go
-          print('  DUPLICATES, item sets are the same')
-          l_count={}
-          for item in items:
-            if len(locations) > 0:
-              l=item.locations[0]
-              if l in l_count:
-                l_count[l]+=1
-              else:
-                l_count[l]=1
-          for key, value in l_count.items():
-            if value > 1:
-              print('%s: %s' % (key, value))
+        print('  Updating playlist contents from local')
+        # Do a simple, faster, update.
+        playlist.removeItems(list(set(plex_items).difference(set(items))))
+        # Add items in the order they are in the local list, more likely
+        # We won't need to redo the whole playlist.
+        playlist.addItems([x for x in items if x not in plex_items])
+
+        # See if the playlist is now correct.
+        if playlist.items() != items:
+          # Fixing has not worked, force the playlist to be correct.
+          # This will handle any issues with duplicate items in the playlist
+          # and ordering but will be slow on large playlists.
+          print('  Resetting playlist contents from local')
+          playlist.removeItems(plex_items)
+          playlist.addItems(items)
+
+        if playlist.items() != items:
+          print('  Failed to reset playlist contents from local')
 
   print('\nFinished. %s playlists done, %s updated.' % (count, updated))
 
